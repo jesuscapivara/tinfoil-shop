@@ -1,115 +1,75 @@
 import fetch from "node-fetch";
 
-const SHOP_URL = "https://tinfoilapp.discloud.app/api"; // Ajuste se necessário
+const SHOP_URL = "https://tinfoilapp.discloud.app/api";
 
 const log = (label, msg) => console.log(`\x1b[36m[${label}]\x1b[0m`, msg);
 const err = (label, msg) => console.log(`\x1b[31m[${label}]\x1b[0m`, msg);
 const success = (label, msg) => console.log(`\x1b[32m[${label}]\x1b[0m`, msg);
-const warn = (label, msg) => console.log(`\x1b[33m[${label}]\x1b[0m`, msg);
 
 async function runDiagnostics() {
-  console.log("🔍 DIAGNÓSTICO AVANÇADO TINFOIL (v2)...\n");
+  console.log("🔍 DIAGNÓSTICO v16 (STREAM MODE)...\n");
 
   // 1. BAIXAR JSON
-  log("STEP 1", `Baixando índice JSON...`);
+  log("STEP 1", `Baixando índice...`);
   let jsonData;
   try {
     const response = await fetch(SHOP_URL);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     jsonData = await response.json();
-    success("PASS", `JSON OK. Versão: "${jsonData.success}"`);
+    success("PASS", `JSON OK: "${jsonData.success}"`);
   } catch (error) {
-    err("CRITICAL", `Falha na API: ${error.message}`);
+    err("CRITICAL", `Falha API: ${error.message}`);
     return;
   }
 
-  if (!jsonData.files || jsonData.files.length === 0) {
-    err("WARN", "Nenhum arquivo no JSON.");
+  if (!jsonData.files?.length) {
+    err("WARN", "Zero arquivos.");
     return;
   }
 
-  // 2. ESCOLHER ARQUIVO
-  const targetGame = jsonData.files[0];
-  log("STEP 2", `Testando: ${targetGame.name}`);
-  console.log(`URL Inicial: ${targetGame.url}`);
+  // 2. VERIFICAR NOVA ESTRUTURA DE URL
+  const game = jsonData.files[0];
+  log("STEP 2", `URL Gerada: ${game.url}`);
 
-  // 3. SIMULAR DOWNLOAD (FOLLOW REDIRECTS MANUALMENTE)
-  log("STEP 3", "Seguindo redirects...");
+  if (game.url.includes("?data=")) {
+    err(
+      "FAIL",
+      "⚠️ A URL ainda está no formato antigo (v15)! O deploy da v16 não funcionou."
+    );
+    return;
+  } else {
+    success("PASS", "URL no formato novo (Path Style).");
+  }
 
-  let currentUrl = targetGame.url;
-  let finalResponse = null;
-  let redirectCount = 0;
+  // 3. TESTE DE STREAM (HEAD REQUEST)
+  log("STEP 3", "Testando conexão direta (Stream)...");
 
   try {
-    while (redirectCount < 5) {
-      // Finge ser um client genérico, não node-fetch
-      const res = await fetch(currentUrl, {
-        redirect: "manual",
-        headers: { "User-Agent": "Tinfoil/17.0" },
-      });
+    // Usa HEAD para não baixar o arquivo todo, apenas ver os headers
+    const res = await fetch(game.url, {
+      method: "HEAD",
+      headers: { "User-Agent": "Tinfoil/17.0" },
+    });
 
-      if (res.status >= 300 && res.status < 400) {
-        const nextLoc = res.headers.get("location");
-        console.log(` ↳ [${res.status}] Redirecionando para: ${nextLoc}`);
+    console.log(`Status: ${res.status} ${res.statusText}`);
+    console.log(`Type: ${res.headers.get("content-type")}`);
+    console.log(`Size: ${res.headers.get("content-length")}`);
 
-        // CHECK DE SEGURANÇA RLKEY
-        if (
-          nextLoc.includes("dropbox") &&
-          nextLoc.includes("/scl/") &&
-          !nextLoc.includes("rlkey=")
-        ) {
-          err(
-            "SECURITY ALERT",
-            "Link '/scl/' detectado SEM 'rlkey'! Isso vai dar erro 400/403."
-          );
-        }
-
-        currentUrl = nextLoc;
-        redirectCount++;
+    if (res.status === 200) {
+      if (res.headers.get("content-type")?.includes("octet-stream")) {
+        success("SUCCESS", "✅ STREAM FUNCIONANDO! O Tinfoil vai aceitar.");
       } else {
-        finalResponse = res;
-        break;
+        err("WARN", "O servidor respondeu 200, mas o tipo não é octet-stream.");
       }
-    }
-
-    // 4. ANÁLISE DO DESTINO FINAL
-    log("STEP 4", "Analisando resposta final...");
-    console.log(
-      `Status Final: ${finalResponse.status} ${finalResponse.statusText}`
-    );
-
-    const contentType = finalResponse.headers.get("content-type");
-    console.log(`Content-Type: ${contentType}`);
-
-    if (finalResponse.status === 200) {
-      if (
-        contentType.includes("application/octet-stream") ||
-        contentType.includes("application/zip")
-      ) {
-        success(
-          "SUCCESS",
-          "✅ LINK VÁLIDO! É um binário. O Tinfoil deve instalar."
-        );
-      } else if (contentType.includes("text/html")) {
-        err("FAIL", "❌ O link final é uma página HTML.");
-
-        // Tenta ler o título da página de erro para saber o motivo
-        const htmlText = await finalResponse.text();
-        const titleMatch = htmlText.match(/<title>(.*?)<\/title>/i);
-        if (titleMatch) {
-          warn("PAGE TITLE", `O Dropbox disse: "${titleMatch[1].trim()}"`);
-        }
-        console.log(
-          "Dica: Se for 'Dropbox - 404' ou 'Error', o rlkey sumiu ou o arquivo foi movido."
-        );
-      } else {
-        warn("WARN", `Tipo de conteúdo suspeito: ${contentType}`);
-      }
+    } else if (res.status === 302) {
+      err(
+        "FAIL",
+        "⚠️ O servidor fez Redirect. A v16 (Stream) NÃO deveria fazer redirect."
+      );
     } else {
-      err("FAIL", `Erro HTTP final: ${finalResponse.status}`);
+      err("FAIL", `Erro HTTP: ${res.status}`);
     }
   } catch (e) {
-    err("CRITICAL", `Erro de conexão: ${e.message}`);
+    err("CRITICAL", `Erro conexão: ${e.message}`);
   }
 }
 
