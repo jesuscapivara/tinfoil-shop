@@ -125,37 +125,25 @@ app.get("/api", async (req, res) => {
 
 // ============== ROTA DOWNLOAD ==============
 app.get("/download/:filename", async (req, res) => {
-  // filename aqui é ignorado (serve só pro Tinfoil ver a extensão .nsp)
-  // O que importa é o ?data=
   const encodedPath = req.query.data;
-
-  if (!encodedPath) {
-    return res.status(400).send("Erro: Parametro data faltando.");
-  }
+  if (!encodedPath) return res.status(400).send("Missing data");
 
   try {
-    // Express decodifica a URL automaticamente, então o "encodeURIComponent"
-    // que fizemos no /api garante que o Base64 chegue aqui intacto (com +).
     const realPath = fromBase64(encodedPath);
 
-    // 1. Obtém link temporário
+    // Pega link cru
     const tempLink = await dbx.filesGetTemporaryLink({ path: realPath });
+    let finalLink = tempLink.result.link;
 
-    // 2. Redirect 302 (Found)
-    // Adicionamos Headers para garantir que o Tinfoil entenda que é um binário
-    res.set("Content-Type", "application/octet-stream");
-    res.redirect(302, tempLink.result.link);
+    // Removemos o dl=1 forçado e removemos headers complexos
+    // Vamos deixar o Tinfoil lidar com o redirect nativamente
+    // Alguns servidores Dropbox já mandam o header correto no link temporário
+
+    log.info(`Redirecting to: ${finalLink.substring(0, 50)}...`);
+    res.redirect(302, finalLink);
   } catch (error) {
-    // LOG DETALHADO DO ERRO PARA DEPURAR
-    const errorMsg = error.error ? JSON.stringify(error.error) : error.message;
-    log.error(`❌ Falha download [${req.params.filename}]:`, errorMsg);
-
-    if (error.status === 409) {
-      return res
-        .status(404)
-        .send("Arquivo não encontrado no Dropbox (Path incorreto).");
-    }
-    res.status(500).send("Erro ao gerar link de download.");
+    log.error(`Erro: ${error.message}`);
+    res.status(500).send("Erro");
   }
 });
 
