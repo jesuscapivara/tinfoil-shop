@@ -7,18 +7,11 @@ dotenv.config();
 
 const PORT = process.env.PORT || 8080;
 const ROOT_GAMES_FOLDER = "/Games_Switch";
-const DOMAIN = process.env.DOMINIO || `localhost:${PORT}`;
-
-// Cache (15 min)
-let fileCache = null;
-let lastCacheTime = 0;
-const CACHE_DURATION = 15 * 60 * 1000;
 
 // Logs
 const log = {
   info: (msg) => console.log(`[INFO] ${msg}`),
   error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
-  debug: (msg) => console.log(`[DEBUG] ${msg}`),
 };
 
 const dbx = new Dropbox({
@@ -30,6 +23,9 @@ const dbx = new Dropbox({
 
 const app = express();
 
+// Middleware para confiar no Proxy da Discloud (Importante para req.protocol funcionar)
+app.enable("trust proxy");
+
 app.use((req, res, next) => {
   req.setTimeout(60000);
   if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
@@ -39,7 +35,11 @@ app.use((req, res, next) => {
 const toBase64 = (str) => Buffer.from(str).toString("base64");
 const fromBase64 = (str) => Buffer.from(str, "base64").toString("utf-8");
 
-// --- SCAN (Igual ao anterior) ---
+// Cache Simples
+let fileCache = null;
+let lastCacheTime = 0;
+const CACHE_DURATION = 15 * 60 * 1000;
+
 async function getAllFilesFromDropbox() {
   const now = Date.now();
   if (fileCache && now - lastCacheTime < CACHE_DURATION) return fileCache;
@@ -75,15 +75,21 @@ async function getAllFilesFromDropbox() {
   }
 }
 
-// ============== ROTA API ==============
+// ============== ROTA API (AUTO-DISCOVERY) ==============
 app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
-    const protocol = process.env.DOMINIO ? "https" : "http";
+
+    // AUTO-DISCOVERY: Pega o domínio e protocolo direto da requisição
+    // Não depende mais do .env DOMINIO
+    const host = req.get("host"); // ex: tinfoilapp.discloud.app
+    const protocol = req.protocol; // ex: https
+
+    const baseUrl = `${protocol}://${host}`;
 
     const tinfoilJson = {
       files: [],
-      success: "Mana Shop v10 (Force DL)",
+      success: `Mana Shop v11 (Auto-Host: ${host})`,
     };
 
     files.forEach((file) => {
@@ -93,8 +99,7 @@ app.get("/api", async (req, res) => {
       const safeUrlName = displayName.replace(/[^a-zA-Z0-9.-]/g, "_");
       const path64 = encodeURIComponent(toBase64(file.path_lower));
 
-      // Note que filename aqui é cosmético para a URL
-      const downloadUrl = `${protocol}://${DOMAIN}/download/${safeUrlName}?data=${path64}`;
+      const downloadUrl = `${baseUrl}/download/${safeUrlName}?data=${path64}`;
 
       tinfoilJson.files.push({
         url: downloadUrl,
@@ -105,11 +110,12 @@ app.get("/api", async (req, res) => {
 
     res.json(tinfoilJson);
   } catch (error) {
+    log.error("Erro API:", error);
     res.status(500).json({ error: "Erro API" });
   }
 });
 
-// ============== ROTA DOWNLOAD (CRÍTICA) ==============
+// ============== ROTA DOWNLOAD ==============
 app.get("/download/:filename", async (req, res) => {
   const encodedPath = req.query.data;
   if (!encodedPath) return res.status(400).send("Missing data");
@@ -117,25 +123,23 @@ app.get("/download/:filename", async (req, res) => {
   try {
     const realPath = fromBase64(encodedPath);
 
-    // 1. Gera link
+    // Pega link do Dropbox
     const tempLink = await dbx.filesGetTemporaryLink({ path: realPath });
     let finalLink = tempLink.result.link;
 
-    // 2. FORÇA O DOWNLOAD (dl=1)
-    // Se já tiver query params (tem quase certeza que sim), usa &, senão usa ?
+    // Força DL=1 (Download direto)
     if (finalLink.includes("?")) {
       finalLink += "&dl=1";
     } else {
       finalLink += "?dl=1";
     }
 
-    // 3. DEBUG LOG (Para você ver no terminal da Discloud)
-    log.info(`🔗 LINK GERADO: ${finalLink}`);
+    log.info(
+      `🔗 Redirecionando para Dropbox: ${finalLink.substring(0, 30)}...`
+    );
 
-    // 4. Headers de arquivo binário (Para o Tinfoil não pensar que é HTML)
+    // Headers Binários
     res.setHeader("Content-Type", "application/octet-stream");
-
-    // 5. Redirect
     res.redirect(302, finalLink);
   } catch (error) {
     log.error(`❌ Erro Link:`, error);
@@ -144,11 +148,6 @@ app.get("/download/:filename", async (req, res) => {
   }
 });
 
-// Rota de Teste de Sanidade (Mantida para garantir)
-app.get("/test-download", (req, res) => {
-  res.redirect(302, "https://github.com/blawar/nut/raw/master/nut.png");
-});
-
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v10 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v11 rodando na porta ${PORT}`);
 });
