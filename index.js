@@ -81,7 +81,7 @@ app.get("/api", async (req, res) => {
 
     const tinfoilJson = {
       files: [],
-      success: `Mana Shop v13 (Direct CDN)`,
+      success: `Mana Shop v14 (Stability Fix)`,
     };
 
     files.forEach((file) => {
@@ -107,7 +107,7 @@ app.get("/api", async (req, res) => {
   }
 });
 
-// ============== ROTA DOWNLOAD (ARQUITETURA NOVA) ==============
+// ============== ROTA DOWNLOAD (CORREÇÃO DE LÓGICA) ==============
 app.get("/download/:filename", async (req, res) => {
   const encodedPath = req.query.data;
   if (!encodedPath) return res.status(400).send("Missing data");
@@ -116,58 +116,44 @@ app.get("/download/:filename", async (req, res) => {
     const realPath = fromBase64(encodedPath);
     let sharedLink = "";
 
-    // ESTRATÉGIA BLINDADA: Tenta criar link, se já existir, pega o existente.
-    try {
-      // Tenta criar um link novo
-      const response = await dbx.sharingCreateSharedLinkWithSettings({
+    // PASSO 1: VERIFICA SE JÁ EXISTE (Para evitar erro 409)
+    const listResponse = await dbx.sharingListSharedLinks({ path: realPath });
+
+    if (listResponse.result.links.length > 0) {
+      // Cenário A: Link já existe, pega o primeiro
+      sharedLink = listResponse.result.links[0].url;
+      log.info("♻️ Link existente reutilizado.");
+    } else {
+      // Cenário B: Não existe, cria um novo
+      log.info("🆕 Criando novo link compartilhado...");
+      const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
         path: realPath,
       });
-      sharedLink = response.result.url;
-    } catch (shareError) {
-      // Se der erro "shared_link_already_exists", buscamos o link que já existe
-      if (
-        shareError.error &&
-        shareError.error[".tag"] === "shared_link_already_exists"
-      ) {
-        const listResponse = await dbx.sharingListSharedLinks({
-          path: realPath,
-          direct_only: true,
-        });
-        if (listResponse.result.links.length > 0) {
-          sharedLink = listResponse.result.links[0].url;
-        } else {
-          throw new Error("Falha ao recuperar link existente.");
-        }
-      } else {
-        throw shareError;
-      }
+      sharedLink = createResponse.result.url;
     }
 
-    // TRANSFORMAÇÃO MÁGICA PARA CDN (DIRECT DOWNLOAD)
-    // Link original: https://www.dropbox.com/s/xyz/game.nsp?dl=0
-    // Link CDN:      https://dl.dropboxusercontent.com/s/xyz/game.nsp
-
-    // 1. Troca o dominio
+    // PASSO 2: CONVERSÃO CDN (www -> dl)
+    // Isso garante o download direto sem página HTML
     let directLink = sharedLink.replace(
       "www.dropbox.com",
       "dl.dropboxusercontent.com"
     );
+    directLink = directLink.replace("dropbox.com", "dl.dropboxusercontent.com"); // Garantia extra
 
-    // 2. Remove parâmetros antigos (?dl=0)
+    // Remove params de tracking (?dl=0)
     directLink = directLink.split("?")[0];
 
-    // 3. Log para validação
     log.info(`🔗 CDN Link: ${directLink}`);
 
-    // 4. Redirect
+    // PASSO 3: REDIRECT
     res.setHeader("Content-Type", "application/octet-stream");
     res.redirect(302, directLink);
   } catch (error) {
-    log.error(`❌ Download Error:`, error);
-    res.status(500).send("Erro ao gerar link CDN.");
+    log.error(`❌ Erro Crítico:`, error);
+    res.status(500).send("Erro ao processar link.");
   }
 });
 
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v13 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v14 rodando na porta ${PORT}`);
 });
