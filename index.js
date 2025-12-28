@@ -77,11 +77,12 @@ app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
     const host = req.get("host") || process.env.DOMINIO || `localhost:${PORT}`;
-    const baseUrl = `https://${host}`;
+    const protocol = req.secure ? "https" : "https"; // Força HTTPS na Discloud
+    const baseUrl = `${protocol}://${host}`;
 
     const tinfoilJson = {
       files: [],
-      success: `Mana Shop v14 (Stability Fix)`,
+      success: `Mana Shop v15 (RLKEY Fix)`,
     };
 
     files.forEach((file) => {
@@ -107,7 +108,7 @@ app.get("/api", async (req, res) => {
   }
 });
 
-// ============== ROTA DOWNLOAD (CORREÇÃO DE LÓGICA) ==============
+// ============== ROTA DOWNLOAD (CORREÇÃO SCL/RLKEY) ==============
 app.get("/download/:filename", async (req, res) => {
   const encodedPath = req.query.data;
   if (!encodedPath) return res.status(400).send("Missing data");
@@ -116,44 +117,43 @@ app.get("/download/:filename", async (req, res) => {
     const realPath = fromBase64(encodedPath);
     let sharedLink = "";
 
-    // PASSO 1: VERIFICA SE JÁ EXISTE (Para evitar erro 409)
+    // 1. Obtém/Cria Link Compartilhado
     const listResponse = await dbx.sharingListSharedLinks({ path: realPath });
 
     if (listResponse.result.links.length > 0) {
-      // Cenário A: Link já existe, pega o primeiro
       sharedLink = listResponse.result.links[0].url;
-      log.info("♻️ Link existente reutilizado.");
     } else {
-      // Cenário B: Não existe, cria um novo
-      log.info("🆕 Criando novo link compartilhado...");
       const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
         path: realPath,
       });
       sharedLink = createResponse.result.url;
     }
 
-    // PASSO 2: CONVERSÃO CDN (www -> dl)
-    // Isso garante o download direto sem página HTML
-    let directLink = sharedLink.replace(
-      "www.dropbox.com",
-      "dl.dropboxusercontent.com"
-    );
-    directLink = directLink.replace("dropbox.com", "dl.dropboxusercontent.com"); // Garantia extra
+    // 2. PARSEAMENTO INTELIGENTE DE URL (A Correção)
+    // Usamos a classe URL para não perder parametros vitais como 'rlkey'
+    const cdnUrl = new URL(sharedLink);
 
-    // Remove params de tracking (?dl=0)
-    directLink = directLink.split("?")[0];
+    // Troca o host para CDN direto
+    cdnUrl.hostname = "dl.dropboxusercontent.com";
 
-    log.info(`🔗 CDN Link: ${directLink}`);
+    // Garante que não estamos forçando preview (remove dl=0 se existir)
+    cdnUrl.searchParams.delete("dl");
+    cdnUrl.searchParams.delete("preview");
 
-    // PASSO 3: REDIRECT
+    // O rlkey é mantido automaticamente pelo objeto URL!
+
+    const finalLink = cdnUrl.toString();
+    log.info(`🔗 Link Gerado: ${finalLink}`);
+
+    // 3. REDIRECT
     res.setHeader("Content-Type", "application/octet-stream");
-    res.redirect(302, directLink);
+    res.redirect(302, finalLink);
   } catch (error) {
-    log.error(`❌ Erro Crítico:`, error);
+    log.error(`❌ Erro Download:`, error);
     res.status(500).send("Erro ao processar link.");
   }
 });
 
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v14 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v15 rodando na porta ${PORT}`);
 });
