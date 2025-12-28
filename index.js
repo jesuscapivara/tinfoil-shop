@@ -159,6 +159,15 @@ app.get("/download/:filename", async (req, res) => {
   }
 });
 
+// ROTA DE TESTE DE SANIDADE
+app.get('/test-download', (req, res) => {
+    // Redireciona para uma imagem qualquer da internet só pra testar o redirect
+    // Se o Tinfoil conseguir baixar/abrir (vai dar erro de nsp invalido, mas não "Failed to Open"),
+    // significa que a ponte está funcionando.
+    log.info('🧪 Teste de Sanidade acionado');
+    res.redirect(302, 'https://github.com/blawar/nut/raw/master/nut.png'); 
+});
+
 // Rota para debug rápido no navegador
 app.get("/", (req, res) =>
   res.send("Mana Shop v9 Online. Acesse /api no Tinfoil.")
