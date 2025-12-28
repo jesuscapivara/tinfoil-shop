@@ -14,10 +14,11 @@ let fileCache = null;
 let lastCacheTime = 0;
 const CACHE_DURATION = 15 * 60 * 1000;
 
-// Logs simplificados para produção
+// Logs
 const log = {
   info: (msg) => console.log(`[INFO] ${msg}`),
   error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
+  debug: (msg) => console.log(`[DEBUG] ${msg}`),
 };
 
 const dbx = new Dropbox({
@@ -31,7 +32,6 @@ const app = express();
 
 app.use((req, res, next) => {
   req.setTimeout(60000);
-  // Log apenas de erros ou downloads para não poluir
   if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
   next();
 });
@@ -39,15 +39,13 @@ app.use((req, res, next) => {
 const toBase64 = (str) => Buffer.from(str).toString("base64");
 const fromBase64 = (str) => Buffer.from(str, "base64").toString("utf-8");
 
+// --- SCAN (Igual ao anterior) ---
 async function getAllFilesFromDropbox() {
   const now = Date.now();
-  if (fileCache && now - lastCacheTime < CACHE_DURATION) {
-    return fileCache;
-  }
+  if (fileCache && now - lastCacheTime < CACHE_DURATION) return fileCache;
 
-  log.info("🔄 Refreshing Dropbox Cache...");
+  log.info("🔄 Atualizando Cache Dropbox...");
   let allFiles = [];
-
   try {
     let response = await dbx.filesListFolder({
       path: ROOT_GAMES_FOLDER,
@@ -63,7 +61,6 @@ async function getAllFilesFromDropbox() {
       allFiles = allFiles.concat(response.result.entries);
     }
 
-    // Filtra apenas arquivos de jogo
     const validFiles = allFiles.filter(
       (entry) =>
         entry[".tag"] === "file" && entry.name.match(/\.(nsp|nsz|xci)$/i)
@@ -71,15 +68,14 @@ async function getAllFilesFromDropbox() {
 
     fileCache = validFiles;
     lastCacheTime = now;
-    log.info(`✅ Cache atualizado: ${validFiles.length} jogos.`);
     return validFiles;
   } catch (e) {
-    log.error("Erro no Scan Dropbox:", e);
+    log.error("Erro Scan:", e);
     return [];
   }
 }
 
-// ============== ROTA API (JSON) ==============
+// ============== ROTA API ==============
 app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
@@ -87,43 +83,33 @@ app.get("/api", async (req, res) => {
 
     const tinfoilJson = {
       files: [],
-      success: "Mana Shop v9 (Stable)",
+      success: "Mana Shop v10 (Force DL)",
     };
 
     files.forEach((file) => {
-      // 1. NOME LIMPO PARA A UI (Display Name)
-      // Remove tamanhos desnecessários ex: "(4.GB)"
       const displayName = file.name
         .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
         .trim();
-
-      // 2. NOME SEGURO PARA A URL (Slug)
-      // Substitui qualquer coisa que não seja letra, numero ou ponto por underline
-      // Ex: "Hades 2 [v0].nsp" vira "Hades_2__v0_.nsp"
-      // Isso evita erro 400/404 em proxies chatos
       const safeUrlName = displayName.replace(/[^a-zA-Z0-9.-]/g, "_");
-
-      // 3. BASE64 SEGURO
-      // Importante: encodeURIComponent no Base64 para preservar o caractere "+"
       const path64 = encodeURIComponent(toBase64(file.path_lower));
 
+      // Note que filename aqui é cosmético para a URL
       const downloadUrl = `${protocol}://${DOMAIN}/download/${safeUrlName}?data=${path64}`;
 
       tinfoilJson.files.push({
         url: downloadUrl,
         size: file.size,
-        name: displayName, // Mantém [TitleID] para a capa funcionar
+        name: displayName,
       });
     });
 
     res.json(tinfoilJson);
   } catch (error) {
-    log.error("Erro API /api:", error);
-    res.status(500).json({ error: "Erro interno" });
+    res.status(500).json({ error: "Erro API" });
   }
 });
 
-// ============== ROTA DOWNLOAD ==============
+// ============== ROTA DOWNLOAD (CRÍTICA) ==============
 app.get("/download/:filename", async (req, res) => {
   const encodedPath = req.query.data;
   if (!encodedPath) return res.status(400).send("Missing data");
@@ -131,36 +117,38 @@ app.get("/download/:filename", async (req, res) => {
   try {
     const realPath = fromBase64(encodedPath);
 
-    // Pega link cru
+    // 1. Gera link
     const tempLink = await dbx.filesGetTemporaryLink({ path: realPath });
     let finalLink = tempLink.result.link;
 
-    // Removemos o dl=1 forçado e removemos headers complexos
-    // Vamos deixar o Tinfoil lidar com o redirect nativamente
-    // Alguns servidores Dropbox já mandam o header correto no link temporário
+    // 2. FORÇA O DOWNLOAD (dl=1)
+    // Se já tiver query params (tem quase certeza que sim), usa &, senão usa ?
+    if (finalLink.includes("?")) {
+      finalLink += "&dl=1";
+    } else {
+      finalLink += "?dl=1";
+    }
 
-    log.info(`Redirecting to: ${finalLink.substring(0, 50)}...`);
+    // 3. DEBUG LOG (Para você ver no terminal da Discloud)
+    log.info(`🔗 LINK GERADO: ${finalLink}`);
+
+    // 4. Headers de arquivo binário (Para o Tinfoil não pensar que é HTML)
+    res.setHeader("Content-Type", "application/octet-stream");
+
+    // 5. Redirect
     res.redirect(302, finalLink);
   } catch (error) {
-    log.error(`Erro: ${error.message}`);
+    log.error(`❌ Erro Link:`, error);
+    if (error.status === 409) return res.status(404).send("Path not found");
     res.status(500).send("Erro");
   }
 });
 
-// ROTA DE TESTE DE SANIDADE
-app.get('/test-download', (req, res) => {
-    // Redireciona para uma imagem qualquer da internet só pra testar o redirect
-    // Se o Tinfoil conseguir baixar/abrir (vai dar erro de nsp invalido, mas não "Failed to Open"),
-    // significa que a ponte está funcionando.
-    log.info('🧪 Teste de Sanidade acionado');
-    res.redirect(302, 'https://github.com/blawar/nut/raw/master/nut.png'); 
+// Rota de Teste de Sanidade (Mantida para garantir)
+app.get("/test-download", (req, res) => {
+  res.redirect(302, "https://github.com/blawar/nut/raw/master/nut.png");
 });
 
-// Rota para debug rápido no navegador
-app.get("/", (req, res) =>
-  res.send("Mana Shop v9 Online. Acesse /api no Tinfoil.")
-);
-
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v9 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v10 rodando na porta ${PORT}`);
 });
