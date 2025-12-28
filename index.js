@@ -2,6 +2,7 @@ import express from "express";
 import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
+import manaBridge from "./manaBridge.js";
 
 dotenv.config();
 
@@ -23,6 +24,9 @@ const dbx = new Dropbox({
 
 const app = express();
 app.enable("trust proxy");
+
+app.use(express.json()); // Necessário para ler o JSON do magnet link
+app.use(manaBridge);
 
 // --- ESTADO GLOBAL DO SERVIDOR ---
 let cachedGames = [];
