@@ -1,6 +1,6 @@
 import express from "express";
 import { Dropbox } from "dropbox";
-import fetch from "isomorphic-fetch"; // Usado para resolver o redirect
+import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -24,7 +24,7 @@ const app = express();
 app.enable("trust proxy");
 
 app.use((req, res, next) => {
-  req.setTimeout(30000); // Timeout normal (não é mais stream)
+  req.setTimeout(20000);
   if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
   next();
 });
@@ -77,7 +77,7 @@ app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
     const host = req.get("host") || process.env.DOMINIO || `localhost:${PORT}`;
-    const protocol = "https";
+    const protocol = "https"; // Força HTTPS
     const baseUrl = `${protocol}://${host}`;
 
     const tinfoilJson = {
@@ -93,7 +93,7 @@ app.get("/api", async (req, res) => {
       const safeUrlName = displayName.replace(/[^a-zA-Z0-9.-]/g, "_");
       const path64 = encodeURIComponent(toBase64(file.path_lower));
 
-      // Formato: /download/NomeDoJogo.nsp?data=...
+      // Formato v17: /download/NomeDoJogo.nsp?data=...
       const downloadUrl = `${baseUrl}/download/${safeUrlName}?data=${path64}`;
 
       tinfoilJson.files.push({
@@ -130,7 +130,7 @@ app.get("/download/:filename", async (req, res) => {
       sharedLink = createResponse.result.url;
     }
 
-    // 2. Prepara URL do Dropbox
+    // 2. Prepara URL do Dropbox (mantendo rlkey)
     const cdnUrl = new URL(sharedLink);
     cdnUrl.hostname = "dl.dropboxusercontent.com";
     cdnUrl.searchParams.delete("dl");
@@ -140,25 +140,37 @@ app.get("/download/:filename", async (req, res) => {
     log.info(`🔍 Resolvendo link final para: ${req.params.filename}`);
 
     // 3. O PULO DO GATO: Resolver o Redirect no Servidor
-    // Nós fazemos a requisição HEAD para o Dropbox só para pegar o header "Location"
-    // Isso nos dá o link "uc..." direto, pulando avisos de vírus ou HTML
+    // Fazemos HEAD request com redirect: 'manual' para pegar o header Location
     const headResp = await fetch(initialLink, {
       method: "HEAD",
-      redirect: "manual", // Importante: Não segue o redirect, apenas reporta
+      redirect: "manual",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", // Finge ser browser
+      },
     });
 
     let finalLink = initialLink;
 
-    if (headResp.status === 301 || headResp.status === 302) {
+    // Se o Dropbox respondeu com 301/302, pegamos o destino real (uc...)
+    if (headResp.status >= 300 && headResp.status < 400) {
       const location = headResp.headers.get("location");
       if (location) {
         finalLink = location;
-        log.info('✅ Link final "uc..." encontrado com sucesso.');
+        log.info('✅ Link final "uc..." encontrado.');
       }
+    } else {
+      log.info(
+        `⚠️ Dropbox não redirecionou (Status ${headResp.status}). Usando link CDN direto.`
+      );
     }
 
-    // 4. Redireciona o Tinfoil para o Link Bruto (Raw)
+    // 4. Redireciona o Tinfoil para o Link Bruto
+    // Headers essenciais para o Tinfoil aceitar
     res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${req.params.filename}"`
+    );
     res.redirect(302, finalLink);
   } catch (error) {
     log.error(`❌ Erro Resolver:`, error);
