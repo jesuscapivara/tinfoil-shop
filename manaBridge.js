@@ -53,6 +53,8 @@ client.on("error", (err) =>
 );
 
 let activeDownloads = {};
+let completedDownloads = []; // Histórico de downloads finalizados
+const MAX_COMPLETED = 20; // Mantém últimos 20 finalizados
 
 // --- HELPERS ---
 const generateToken = (email, pass) =>
@@ -132,15 +134,39 @@ router.get("/admin", requireAuth, (req, res) => {
 });
 
 router.get("/bridge/status", requireAuth, (req, res) => {
-  res.json(
-    Object.values(activeDownloads).map((d) => ({
-      id: d.id,
-      name: d.name,
-      status: d.state,
-      percent: d.progressPercent,
-      speed: d.speed,
-    }))
-  );
+  const active = Object.values(activeDownloads).map((d) => ({
+    id: d.id,
+    name: d.name || "Conectando...",
+    phase: d.phase || "waiting",
+    // Download info
+    download: {
+      percent: parseFloat(d.downloadPercent) || 0,
+      speed: d.downloadSpeed || "-- MB/s",
+      downloaded: d.downloaded || "0 MB",
+      total: d.total || "-- MB",
+      peers: d.peers || 0,
+      eta: d.downloadEta || "--:--",
+      done: d.downloadDone || false,
+    },
+    // Upload info
+    upload: {
+      percent: parseFloat(d.uploadPercent) || 0,
+      speed: d.uploadSpeed || "-- MB/s",
+      uploaded: d.uploadedBytes || "0 MB",
+      total: d.uploadTotal || "-- MB",
+      currentFile: d.currentFile || "",
+      fileIndex: d.fileIndex || 0,
+      totalFiles: d.totalFiles || 0,
+      done: d.uploadDone || false,
+    },
+    error: d.error || null,
+    startedAt: d.startedAt,
+  }));
+
+  res.json({
+    active,
+    completed: completedDownloads,
+  });
 });
 
 // ═══════════════════════════════════════════════
@@ -188,9 +214,6 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       );
       log(`   Peers conectados: ${torrent.numPeers}`, "TORRENT");
 
-      activeDownloads[id].name = torrent.name;
-      activeDownloads[id].state = "📥 Conectado, iniciando download...";
-
       // Lista TODOS os arquivos
       log(`📁 LISTA COMPLETA DE ARQUIVOS:`, "TORRENT");
       torrent.files.forEach((f, i) => {
@@ -205,10 +228,24 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       );
       log(`🎮 Arquivos de jogo encontrados: ${gameFiles.length}`, "TORRENT");
 
+      // Calcula tamanho total dos jogos
+      const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
+      const totalSizeStr =
+        totalGameSize > 1024 * 1024 * 1024
+          ? (totalGameSize / 1024 / 1024 / 1024).toFixed(2) + " GB"
+          : (totalGameSize / 1024 / 1024).toFixed(2) + " MB";
+
+      activeDownloads[id].name = torrent.name;
+      activeDownloads[id].phase = "downloading";
+      activeDownloads[id].total = totalSizeStr;
+      activeDownloads[id].uploadTotal = totalSizeStr;
+      activeDownloads[id].peers = torrent.numPeers;
+      activeDownloads[id].totalFiles = gameFiles.length;
+
       if (gameFiles.length === 0) {
         log(`❌ ERRO: Nenhum arquivo .nsp/.nsz/.xci encontrado!`, "ERROR");
-        activeDownloads[id].state =
-          "❌ Nenhum jogo Switch encontrado no torrent";
+        activeDownloads[id].phase = "error";
+        activeDownloads[id].error = "Nenhum jogo Switch encontrado no torrent";
         torrent.destroy();
         return;
       }
@@ -228,24 +265,52 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       let lastLoggedProgress = 0;
       torrent.on("download", () => {
         const progress = Math.floor(torrent.progress * 100);
-        activeDownloads[id].progressPercent = progress.toFixed(1);
-        activeDownloads[id].speed =
-          (torrent.downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
-        activeDownloads[id].state = `📥 Baixando... ${progress}%`;
+        const downloaded = torrent.downloaded;
+        const downloadSpeed = torrent.downloadSpeed;
+        const uploadSpeed = torrent.uploadSpeed;
+        const uploaded = torrent.uploaded;
+        const timeRemaining = torrent.timeRemaining;
+
+        // Formata valores
+        const formatBytes = (bytes) => {
+          if (bytes > 1024 * 1024 * 1024)
+            return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+          return (bytes / 1024 / 1024).toFixed(2) + " MB";
+        };
+
+        const formatTime = (ms) => {
+          if (!ms || ms === Infinity) return "--:--";
+          const seconds = Math.floor(ms / 1000);
+          const mins = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          if (mins > 60) {
+            const hours = Math.floor(mins / 60);
+            return `${hours}h ${mins % 60}m`;
+          }
+          return `${mins}:${secs.toString().padStart(2, "0")}`;
+        };
+
+        activeDownloads[id].downloadPercent = progress.toFixed(1);
+        activeDownloads[id].downloadSpeed =
+          (downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
+        activeDownloads[id].downloaded = formatBytes(downloaded);
+        activeDownloads[id].peers = torrent.numPeers;
+        activeDownloads[id].downloadEta = formatTime(timeRemaining);
+        activeDownloads[id].phase = "downloading";
 
         // Log a cada 10%
         if (progress >= lastLoggedProgress + 10) {
           lastLoggedProgress = progress;
           log(
-            `📥 Download: ${progress}% | Velocidade: ${activeDownloads[id].speed} | Peers: ${torrent.numPeers}`,
+            `📥 Download: ${progress}% | ${activeDownloads[id].downloadSpeed} | Peers: ${torrent.numPeers} | ETA: ${activeDownloads[id].downloadEta}`,
             "TORRENT"
           );
         }
       });
 
-      // Novos peers
+      // Atualiza peers
       torrent.on("wire", () => {
-        log(`🔗 Novo peer conectado. Total: ${torrent.numPeers}`, "TORRENT");
+        activeDownloads[id].peers = torrent.numPeers;
       });
 
       // DOWNLOAD COMPLETO
@@ -256,29 +321,46 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         log(`   Arquivos de jogo: ${gameFiles.length}`, "TORRENT");
         log(`═══════════════════════════════════════════════`, "TORRENT");
 
-        activeDownloads[id].state = "📤 Preparando upload para Dropbox...";
-        activeDownloads[id].progressPercent = 0;
+        // Marca download como concluído
+        activeDownloads[id].downloadPercent = 100;
+        activeDownloads[id].downloadDone = true;
+        activeDownloads[id].downloadEta = "Concluído";
+        activeDownloads[id].phase = "uploading";
+        activeDownloads[id].uploadSpeed = "-- MB/s";
+
+        let totalUploaded = 0;
+        const totalUploadSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
 
         try {
           for (let i = 0; i < gameFiles.length; i++) {
             const file = gameFiles[i];
             const destPath = `${ROOT_GAMES_FOLDER}/${gameFolderName}/${file.name}`;
+            const fileSizeStr =
+              file.length > 1024 * 1024 * 1024
+                ? (file.length / 1024 / 1024 / 1024).toFixed(2) + " GB"
+                : (file.length / 1024 / 1024).toFixed(2) + " MB";
 
             log(
               `📤 UPLOAD ${i + 1}/${gameFiles.length}: ${file.name}`,
               "UPLOAD"
             );
             log(`   Destino: ${destPath}`, "UPLOAD");
-            log(
-              `   Tamanho: ${(file.length / 1024 / 1024 / 1024).toFixed(2)} GB`,
-              "UPLOAD"
-            );
+            log(`   Tamanho: ${fileSizeStr}`, "UPLOAD");
 
-            activeDownloads[id].state = `📤 Enviando ${i + 1}/${
-              gameFiles.length
-            }: ${file.name.substring(0, 30)}...`;
+            activeDownloads[id].currentFile = file.name;
+            activeDownloads[id].fileIndex = i + 1;
 
             await uploadFileToDropbox(file, destPath, id, gameFiles.length, i);
+
+            totalUploaded += file.length;
+            const uploadProgress = Math.floor(
+              (totalUploaded / totalUploadSize) * 100
+            );
+            activeDownloads[id].uploadPercent = uploadProgress;
+            activeDownloads[id].uploadedBytes =
+              totalUploaded > 1024 * 1024 * 1024
+                ? (totalUploaded / 1024 / 1024 / 1024).toFixed(2) + " GB"
+                : (totalUploaded / 1024 / 1024).toFixed(2) + " MB";
 
             log(`✅ Upload ${i + 1}/${gameFiles.length} concluído!`, "UPLOAD");
           }
@@ -289,10 +371,31 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           log(`   Arquivos: ${gameFiles.length}`, "SUCCESS");
           log(`═══════════════════════════════════════════════`, "SUCCESS");
 
-          activeDownloads[id].state = "✅ Sucesso! Disponível no Tinfoil.";
-          activeDownloads[id].progressPercent = 100;
+          // Marca como concluído
+          activeDownloads[id].uploadPercent = 100;
+          activeDownloads[id].uploadDone = true;
+          activeDownloads[id].phase = "done";
 
-          setTimeout(() => delete activeDownloads[id], 120000);
+          // Adiciona ao histórico de finalizados
+          const completedEntry = {
+            id,
+            name: gameFolderName,
+            files: gameFiles.length,
+            size: activeDownloads[id].total,
+            folder: `${ROOT_GAMES_FOLDER}/${gameFolderName}`,
+            completedAt: new Date().toISOString(),
+            duration: Math.floor(
+              (Date.now() - new Date(activeDownloads[id].startedAt).getTime()) /
+                1000
+            ),
+          };
+          completedDownloads.unshift(completedEntry);
+          if (completedDownloads.length > MAX_COMPLETED) {
+            completedDownloads.pop();
+          }
+
+          // Remove do ativo após 10 segundos
+          setTimeout(() => delete activeDownloads[id], 10000);
         } catch (err) {
           log(`═══════════════════════════════════════════════`, "ERROR");
           log(`❌ ERRO NO UPLOAD!`, "ERROR");
@@ -300,7 +403,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           log(`   Stack: ${err.stack}`, "ERROR");
           log(`═══════════════════════════════════════════════`, "ERROR");
 
-          activeDownloads[id].state = `❌ Erro: ${err.message}`;
+          activeDownloads[id].error = err.message;
+          activeDownloads[id].phase = "error";
         } finally {
           torrent.destroy();
           log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
@@ -309,7 +413,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
 
       torrent.on("error", (err) => {
         log(`❌ ERRO NO TORRENT: ${err.message}`, "ERROR");
-        activeDownloads[id].state = `❌ Erro: ${err.message}`;
+        activeDownloads[id].error = err.message;
+        activeDownloads[id].phase = "error";
       });
 
       torrent.on("warning", (warn) => {
@@ -318,14 +423,16 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
     });
   } catch (err) {
     log(`❌ ERRO ao adicionar torrent: ${err.message}`, "ERROR");
-    activeDownloads[id].state = `❌ Erro: ${err.message}`;
+    activeDownloads[id].error = err.message;
+    activeDownloads[id].phase = "error";
   }
 
   // Timeout de 5 minutos
   setTimeout(() => {
-    if (activeDownloads[id]?.state === "Conectando aos peers...") {
+    if (activeDownloads[id]?.phase === "connecting") {
       log(`⏰ TIMEOUT: Nenhum peer encontrado após 5 minutos`, "ERROR");
-      activeDownloads[id].state = "❌ Timeout: Nenhum peer encontrado";
+      activeDownloads[id].error = "Timeout: Nenhum peer encontrado";
+      activeDownloads[id].phase = "error";
     }
   }, 300000);
 }
@@ -469,10 +576,28 @@ router.post("/bridge/upload", requireAuth, async (req, res) => {
 
   activeDownloads[id] = {
     id,
-    name: "Inicializando...",
-    state: "Conectando aos peers...",
-    progressPercent: 0,
-    speed: "0 MB/s",
+    name: "Conectando...",
+    phase: "connecting",
+    startedAt: new Date().toISOString(),
+    // Download
+    downloadPercent: 0,
+    downloadSpeed: "-- MB/s",
+    downloaded: "0 MB",
+    total: "-- MB",
+    peers: 0,
+    downloadEta: "--:--",
+    downloadDone: false,
+    // Upload
+    uploadPercent: 0,
+    uploadSpeed: "-- MB/s",
+    uploadedBytes: "0 MB",
+    uploadTotal: "-- MB",
+    currentFile: "",
+    fileIndex: 0,
+    totalFiles: 0,
+    uploadDone: false,
+    // Error
+    error: null,
   };
 
   log(`📨 Magnet recebido: ${magnet.substring(0, 60)}...`, "API");
@@ -494,9 +619,27 @@ router.post(
     activeDownloads[id] = {
       id,
       name: req.file.originalname,
-      state: "Conectando aos peers...",
-      progressPercent: 0,
-      speed: "0 MB/s",
+      phase: "connecting",
+      startedAt: new Date().toISOString(),
+      // Download
+      downloadPercent: 0,
+      downloadSpeed: "-- MB/s",
+      downloaded: "0 MB",
+      total: "-- MB",
+      peers: 0,
+      downloadEta: "--:--",
+      downloadDone: false,
+      // Upload
+      uploadPercent: 0,
+      uploadSpeed: "-- MB/s",
+      uploadedBytes: "0 MB",
+      uploadTotal: "-- MB",
+      currentFile: "",
+      fileIndex: 0,
+      totalFiles: 0,
+      uploadDone: false,
+      // Error
+      error: null,
     };
 
     log(

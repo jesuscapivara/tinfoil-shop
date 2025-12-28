@@ -146,218 +146,395 @@ export function dashboardTemplate() {
     <title>Mana Shop | Dashboard</title>
     <style>
         :root { 
-            --bg: #0f172a; 
-            --card: #1e293b; 
-            --text: #94a3b8; 
-            --white: #f8fafc; 
+            --bg: #0a0e14; 
+            --card: #131a24; 
+            --card-hover: #1a232e;
+            --surface: #0d1117;
+            --text: #8b9cb3; 
+            --text-muted: #5a6a7e;
+            --white: #e8ecf2; 
             --primary: #6366f1; 
             --success: #10b981; 
             --error: #ef4444; 
-            --warning: #f59e0b; 
+            --warning: #f59e0b;
+            --cyan: #06b6d4;
+            --border: #1e293b;
         }
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body { 
             background: var(--bg); 
             color: var(--text); 
-            font-family: 'Segoe UI', sans-serif; 
-            margin: 0; 
-            padding: 20px; 
+            font-family: 'Segoe UI', -apple-system, sans-serif; 
+            padding: 20px;
+            min-height: 100vh;
         }
-        .container { max-width: 800px; margin: 0 auto; }
+        .container { max-width: 900px; margin: 0 auto; }
         
-        /* Header */
         header { 
             display: flex; 
             justify-content: space-between; 
             align-items: center; 
-            margin-bottom: 40px; 
-            flex-wrap: wrap; 
-            gap: 10px; 
+            margin-bottom: 25px; 
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
         }
         h1 { 
             color: var(--white); 
-            font-size: 1.5rem; 
+            font-size: 1.3rem; 
             display: flex; 
             align-items: center; 
-            gap: 10px; 
-            margin: 0; 
+            gap: 10px;
+            font-weight: 500;
         }
         .badge { 
-            background: #334155; 
-            padding: 5px 10px; 
-            border-radius: 20px; 
-            font-size: 0.8rem; 
+            background: linear-gradient(135deg, var(--primary), var(--cyan)); 
+            padding: 3px 8px; 
+            border-radius: 10px; 
+            font-size: 0.65rem;
+            font-weight: 600;
         }
         .logout { 
-            color: var(--text); 
+            color: var(--text-muted); 
             text-decoration: none; 
-            font-size: 0.9rem; 
+            font-size: 0.8rem;
+            transition: color 0.2s;
         }
         .logout:hover { color: var(--error); }
         
         /* Tabs */
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 15px; }
         .tab { 
-            padding: 10px 20px; 
+            padding: 8px 16px; 
             background: var(--card); 
-            border: none; 
-            border-radius: 8px; 
+            border: 1px solid transparent;
+            border-radius: 6px; 
             color: var(--text); 
             cursor: pointer; 
-            transition: 0.2s; 
+            transition: all 0.2s;
+            font-size: 0.85rem;
         }
-        .tab.active { background: var(--primary); color: white; }
-        .tab:hover:not(.active) { background: #334155; }
+        .tab.active { 
+            background: transparent;
+            border-color: var(--primary);
+            color: var(--white); 
+        }
+        .tab:hover:not(.active) { background: var(--card-hover); }
         
         /* Add Section */
         .add-box { 
             background: var(--card); 
-            padding: 20px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); 
+            padding: 16px; 
+            border-radius: 10px;
+            border: 1px solid var(--border);
         }
-        .input-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        .input-row { display: flex; gap: 10px; }
         input[type="text"] { 
             flex: 1; 
-            padding: 12px; 
-            background: #0f172a; 
-            border: 1px solid #334155; 
-            border-radius: 8px; 
-            color: white; 
-            min-width: 200px; 
+            padding: 12px 14px; 
+            background: var(--bg); 
+            border: 1px solid var(--border); 
+            border-radius: 6px; 
+            color: var(--white);
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
         }
+        input[type="text"]:focus { border-color: var(--primary); outline: none; }
         button { 
-            padding: 12px 24px; 
+            padding: 12px 20px; 
             background: var(--primary); 
             color: white; 
             border: none; 
-            border-radius: 8px; 
+            border-radius: 6px; 
             cursor: pointer; 
-            font-weight: 600; 
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: opacity 0.2s;
         }
-        button:hover { opacity: 0.9; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:hover { opacity: 0.85; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
         
         /* File Upload */
         .upload-zone { 
             display: none; 
-            border: 2px dashed #475569; 
-            border-radius: 12px; 
+            border: 2px dashed var(--border); 
+            border-radius: 10px; 
             padding: 40px 20px; 
             text-align: center; 
             cursor: pointer; 
-            transition: 0.2s; 
+            transition: all 0.2s; 
         }
         .upload-zone:hover, .upload-zone.dragover { 
             border-color: var(--primary); 
-            background: rgba(99, 102, 241, 0.1); 
+            background: rgba(99, 102, 241, 0.05); 
         }
         .upload-zone.active { display: block; }
         .upload-zone input { display: none; }
-        .upload-zone .icon { font-size: 3rem; margin-bottom: 10px; }
-        .upload-zone p { margin: 0; color: var(--text); }
+        .upload-zone .icon { font-size: 2rem; margin-bottom: 8px; opacity: 0.6; }
+        .upload-zone p { color: var(--text-muted); font-size: 0.85rem; }
         .upload-zone .file-name { 
             color: var(--success); 
             font-weight: 600; 
-            margin-top: 10px; 
+            margin-top: 10px;
+            font-size: 0.9rem;
         }
-        .upload-btn { margin-top: 15px; display: none; }
+        .upload-btn { margin-top: 12px; display: none; }
         .upload-btn.show { display: inline-block; }
 
-        /* List Section */
-        h3 { margin-top: 30px; color: var(--white); font-weight: 500; }
-        .grid { display: grid; gap: 15px; margin-top: 15px; }
+        /* Section Tabs */
+        .section-tabs {
+            display: flex;
+            gap: 0;
+            margin-top: 25px;
+            border-bottom: 1px solid var(--border);
+        }
+        .section-tab {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.85rem;
+            position: relative;
+            transition: color 0.2s;
+        }
+        .section-tab:hover { color: var(--text); }
+        .section-tab.active { 
+            color: var(--white);
+        }
+        .section-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+        }
+        .section-tab .count {
+            background: var(--card);
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            margin-left: 6px;
+        }
+        .section-tab.active .count {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Sections */
+        .section { display: none; padding-top: 15px; }
+        .section.active { display: block; }
+        
+        .grid { display: grid; gap: 12px; }
+        
+        /* Card */
         .card { 
             background: var(--card); 
-            padding: 20px; 
-            border-radius: 10px; 
-            border-left: 4px solid var(--primary); 
-            animation: fadeIn 0.3s ease; 
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            overflow: hidden;
         }
-        .card.success { border-left-color: var(--success); }
-        .card.error { border-left-color: var(--error); }
+        .card.connecting { border-left: 3px solid var(--text-muted); }
+        .card.downloading { border-left: 3px solid var(--cyan); }
+        .card.uploading { border-left: 3px solid var(--warning); }
+        .card.done { border-left: 3px solid var(--success); }
+        .card.error { border-left: 3px solid var(--error); }
+        
+        .card-main { padding: 14px 16px; }
         .card-header { 
             display: flex; 
-            justify-content: space-between; 
-            margin-bottom: 10px; 
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 14px;
         }
         .game-name { 
             color: var(--white); 
-            font-weight: 600; 
-            word-break: break-all; 
+            font-weight: 600;
+            font-size: 0.9rem;
+            line-height: 1.3;
         }
-        .speed { 
-            font-size: 0.85rem; 
-            color: var(--text); 
-            white-space: nowrap; 
+        .phase-badge {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            white-space: nowrap;
         }
+        .phase-connecting { background: rgba(139, 156, 179, 0.15); color: var(--text); }
+        .phase-downloading { background: rgba(6, 182, 212, 0.15); color: var(--cyan); }
+        .phase-uploading { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .phase-done { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .phase-error { background: rgba(239, 68, 68, 0.15); color: var(--error); }
         
-        /* Progress Bar */
-        .progress-bg { 
+        /* Dual Progress */
+        .progress-group { margin-bottom: 10px; }
+        .progress-group:last-child { margin-bottom: 0; }
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            font-size: 0.75rem;
+        }
+        .progress-label .title {
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .progress-label .title .icon { font-size: 0.9rem; }
+        .progress-label .value { 
+            color: var(--white); 
+            font-weight: 600;
+            font-family: 'SF Mono', 'Consolas', monospace;
+        }
+        .progress-bar { 
             height: 6px; 
-            background: #334155; 
+            background: var(--surface); 
             border-radius: 3px; 
             overflow: hidden; 
         }
         .progress-fill { 
             height: 100%; 
-            background: linear-gradient(90deg, var(--primary), var(--success)); 
-            width: 0%; 
-            transition: width 0.5s ease; 
+            transition: width 0.3s ease;
+            border-radius: 3px;
         }
-        .status-text { font-size: 0.8rem; margin-top: 8px; display: block; }
-
-        .empty { text-align: center; padding: 40px 20px; opacity: 0.5; }
-        .hidden { display: none !important; }
+        .progress-fill.download {
+            background: linear-gradient(90deg, #0891b2, var(--cyan));
+        }
+        .progress-fill.upload {
+            background: linear-gradient(90deg, #d97706, var(--warning));
+        }
+        .progress-fill.done {
+            background: var(--success);
+        }
+        .progress-fill.inactive {
+            background: var(--border);
+        }
         
-        @keyframes fadeIn { 
-            from { opacity: 0; transform: translateY(10px); } 
-            to { opacity: 1; transform: translateY(0); } 
+        /* Stats Row */
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            padding: 10px 16px;
+            background: rgba(0,0,0,0.2);
+            border-top: 1px solid var(--border);
+            font-size: 0.75rem;
         }
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .stat-icon { opacity: 0.6; }
+        .stat-value { color: var(--white); font-weight: 500; }
+        
+        .error-msg {
+            font-size: 0.8rem;
+            color: var(--error);
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: rgba(239, 68, 68, 0.1);
+            border-radius: 4px;
+        }
+        
+        /* Completed Cards */
+        .completed-card {
+            background: var(--card);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .completed-info { flex: 1; }
+        .completed-name {
+            color: var(--white);
+            font-weight: 500;
+            font-size: 0.85rem;
+            margin-bottom: 2px;
+        }
+        .completed-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .completed-badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        
+        .empty { 
+            text-align: center; 
+            padding: 50px 20px; 
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🎮 Mana Bridge <span class="badge">v5.0</span></h1>
-            <a href="/admin/logout" class="logout">🚪 Sair</a>
+            <h1>🎮 Mana Bridge <span class="badge">v6.0</span></h1>
+            <a href="/admin/logout" class="logout">Sair</a>
         </header>
 
-        <!-- Tabs -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('magnet')">🔗 Magnet Link</button>
-            <button class="tab" onclick="switchTab('torrent')">📁 Arquivo .torrent</button>
+            <button class="tab active" onclick="switchInputTab('magnet')">🔗 Magnet</button>
+            <button class="tab" onclick="switchInputTab('torrent')">📁 .torrent</button>
         </div>
 
         <div class="add-box">
-            <!-- Magnet Input -->
             <div id="magnet-section" class="input-row">
                 <input type="text" id="magnet" placeholder="Cole o Magnet Link aqui..." autocomplete="off">
                 <button id="uploadBtn" onclick="uploadMagnet()">🚀 Iniciar</button>
             </div>
             
-            <!-- Torrent File Upload -->
             <div id="torrent-section" class="upload-zone" onclick="document.getElementById('torrentFile').click()">
                 <input type="file" id="torrentFile" accept=".torrent" onchange="handleFileSelect(this)">
                 <div class="icon">📁</div>
-                <p>Clique ou arraste um arquivo <strong>.torrent</strong> aqui</p>
+                <p>Arraste um arquivo <strong>.torrent</strong></p>
                 <div id="selectedFile" class="file-name"></div>
-                <button id="uploadTorrentBtn" class="upload-btn" onclick="event.stopPropagation(); uploadTorrentFile()">🚀 Enviar Torrent</button>
+                <button id="uploadTorrentBtn" class="upload-btn" onclick="event.stopPropagation(); uploadTorrentFile()">🚀 Enviar</button>
             </div>
         </div>
 
-        <h3>Downloads Ativos</h3>
-        <div id="downloads-list" class="grid">
-            <div class="empty">Nenhum download ativo no momento.</div>
+        <div class="section-tabs">
+            <button class="section-tab active" onclick="switchSection('active')">
+                ⚡ Em andamento <span id="active-count" class="count">0</span>
+            </button>
+            <button class="section-tab" onclick="switchSection('completed')">
+                ✓ Finalizados <span id="completed-count" class="count">0</span>
+            </button>
+        </div>
+
+        <div id="active-section" class="section active">
+            <div id="downloads-list" class="grid">
+                <div class="empty">Nenhum download em andamento</div>
+            </div>
+        </div>
+
+        <div id="completed-section" class="section">
+            <div id="completed-list" class="grid">
+                <div class="empty">Nenhum download finalizado ainda</div>
+            </div>
         </div>
     </div>
 
     <script>
         let selectedFile = null;
+        let knownIds = new Set();
         
-        // Tab switching
-        function switchTab(tab) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        function switchInputTab(tab) {
+            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
             
             if (tab === 'magnet') {
@@ -368,17 +545,22 @@ export function dashboardTemplate() {
                 document.getElementById('torrent-section').classList.add('active');
             }
         }
+
+        function switchSection(section) {
+            document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.getElementById(section + '-section').classList.add('active');
+        }
         
-        // File handling
         function handleFileSelect(input) {
             if (input.files && input.files[0]) {
                 selectedFile = input.files[0];
-                document.getElementById('selectedFile').textContent = '✅ ' + selectedFile.name;
+                document.getElementById('selectedFile').textContent = '✓ ' + selectedFile.name;
                 document.getElementById('uploadTorrentBtn').classList.add('show');
             }
         }
         
-        // Drag and drop
         const dropZone = document.getElementById('torrent-section');
         dropZone.addEventListener('dragover', (e) => { 
             e.preventDefault(); 
@@ -396,10 +578,9 @@ export function dashboardTemplate() {
             }
         });
         
-        // Upload Magnet
         async function uploadMagnet() {
             const magnet = document.getElementById('magnet').value.trim();
-            if (!magnet) return alert('Por favor, cole um link!');
+            if (!magnet) return alert('Cole um magnet link!');
             
             const btn = document.getElementById('uploadBtn');
             btn.innerText = 'Enviando...';
@@ -431,9 +612,8 @@ export function dashboardTemplate() {
             btn.disabled = false;
         }
         
-        // Upload Torrent File
         async function uploadTorrentFile() {
-            if (!selectedFile) return alert('Selecione um arquivo .torrent primeiro!');
+            if (!selectedFile) return alert('Selecione um arquivo .torrent!');
             
             const btn = document.getElementById('uploadTorrentBtn');
             btn.innerText = 'Enviando...';
@@ -459,15 +639,39 @@ export function dashboardTemplate() {
                     loadStatus();
                 } else {
                     const data = await res.json();
-                    alert(data.error || 'Erro ao processar torrent.');
+                    alert(data.error || 'Erro ao processar.');
                 }
             } catch(e) { 
                 console.error(e);
                 alert('Erro de conexão');
             }
             
-            btn.innerText = '🚀 Enviar Torrent';
+            btn.innerText = '🚀 Enviar';
             btn.disabled = false;
+        }
+
+        function getPhaseLabel(phase) {
+            const labels = {
+                'connecting': 'Conectando',
+                'downloading': 'Baixando',
+                'uploading': 'Enviando',
+                'done': 'Concluído',
+                'error': 'Erro'
+            };
+            return labels[phase] || phase;
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) return seconds + 's';
+            const mins = Math.floor(seconds / 60);
+            if (mins < 60) return mins + 'min';
+            const hours = Math.floor(mins / 60);
+            return hours + 'h ' + (mins % 60) + 'm';
+        }
+
+        function formatTime(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         }
 
         async function loadStatus() {
@@ -475,40 +679,139 @@ export function dashboardTemplate() {
                 const res = await fetch('/bridge/status', { credentials: 'include' });
                 if (res.status === 401) return window.location.href = '/admin/login';
                 
-                const list = await res.json();
+                const data = await res.json();
+                const activeList = data.active || [];
+                const completedList = data.completed || [];
+
+                document.getElementById('active-count').textContent = activeList.length;
+                document.getElementById('completed-count').textContent = completedList.length;
+
+                // Render active downloads
                 const container = document.getElementById('downloads-list');
                 
-                if (list.length === 0) {
-                    container.innerHTML = '<div class="empty">Nenhum download ativo no momento.</div>';
-                    return;
+                if (activeList.length === 0) {
+                    container.innerHTML = '<div class="empty">Nenhum download em andamento</div>';
+                    knownIds.clear();
+                } else {
+                    const currentIds = new Set(activeList.map(item => item.id));
+                    
+                    activeList.forEach(item => {
+                        const existingCard = document.getElementById('card-' + item.id);
+                        const cardHtml = buildActiveCard(item);
+                        
+                        if (existingCard) {
+                            existingCard.className = 'card ' + item.phase;
+                            existingCard.innerHTML = cardHtml;
+                        } else {
+                            const div = document.createElement('div');
+                            div.id = 'card-' + item.id;
+                            div.className = 'card ' + item.phase;
+                            div.innerHTML = cardHtml;
+                            
+                            const empty = container.querySelector('.empty');
+                            if (empty) empty.remove();
+                            
+                            container.appendChild(div);
+                        }
+                    });
+                    
+                    knownIds.forEach(id => {
+                        if (!currentIds.has(id)) {
+                            const card = document.getElementById('card-' + id);
+                            if (card) card.remove();
+                        }
+                    });
+                    
+                    knownIds = currentIds;
                 }
 
-                container.innerHTML = list.map(item => {
-                    let cardClass = 'card';
-                    if (item.status.includes('✅')) cardClass += ' success';
-                    if (item.status.includes('❌')) cardClass += ' error';
-                    
-                    return \`
-                        <div class="\${cardClass}">
-                            <div class="card-header">
-                                <span class="game-name">\${item.name}</span>
-                                <span class="speed">\${item.speed}</span>
+                // Render completed
+                const completedContainer = document.getElementById('completed-list');
+                if (completedList.length === 0) {
+                    completedContainer.innerHTML = '<div class="empty">Nenhum download finalizado ainda</div>';
+                } else {
+                    completedContainer.innerHTML = completedList.map(item => \`
+                        <div class="completed-card">
+                            <div class="completed-info">
+                                <div class="completed-name">\${item.name}</div>
+                                <div class="completed-meta">
+                                    \${item.files} arquivo(s) • \${item.size} • \${formatDuration(item.duration)}
+                                </div>
                             </div>
-                            <div class="progress-bg">
-                                <div class="progress-fill" style="width: \${item.percent}%"></div>
-                            </div>
-                            <span class="status-text">\${item.status} (\${item.percent}%)</span>
+                            <span class="completed-badge">✓ Disponível</span>
                         </div>
-                    \`;
-                }).join('');
+                    \`).join('');
+                }
+                
             } catch(e) { console.error(e); }
         }
+        
+        function buildActiveCard(item) {
+            const dl = item.download;
+            const up = item.upload;
+            const isError = item.phase === 'error';
+            const isDone = item.phase === 'done';
+            const isConnecting = item.phase === 'connecting';
+            const isDownloading = item.phase === 'downloading';
+            const isUploading = item.phase === 'uploading';
 
-        // Auto refresh
+            const downloadClass = dl.done ? 'done' : (isDownloading ? 'download' : 'inactive');
+            const uploadClass = up.done ? 'done' : (isUploading ? 'upload' : 'inactive');
+
+            return \`
+                <div class="card-main">
+                    <div class="card-header">
+                        <span class="game-name">\${item.name}</span>
+                        <span class="phase-badge phase-\${item.phase}">\${getPhaseLabel(item.phase)}</span>
+                    </div>
+                    
+                    <div class="progress-group">
+                        <div class="progress-label">
+                            <span class="title"><span class="icon">📥</span> Download</span>
+                            <span class="value">\${dl.percent}% \${dl.done ? '✓' : ''}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill \${downloadClass}" style="width: \${dl.percent}%"></div>
+                        </div>
+                    </div>
+
+                    <div class="progress-group">
+                        <div class="progress-label">
+                            <span class="title"><span class="icon">📤</span> Upload Dropbox</span>
+                            <span class="value">\${up.percent}% \${up.done ? '✓' : ''}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill \${uploadClass}" style="width: \${up.percent}%"></div>
+                        </div>
+                    </div>
+                    
+                    \${isError ? \`<div class="error-msg">❌ \${item.error}</div>\` : ''}
+                </div>
+                
+                <div class="stats-row">
+                    <div class="stat">
+                        <span class="stat-icon">⚡</span>
+                        <span class="stat-value">\${isDownloading ? dl.speed : (isUploading ? up.speed : '--')}</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-icon">📊</span>
+                        <span class="stat-value">\${dl.downloaded} / \${dl.total}</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-icon">👥</span>
+                        <span class="stat-value">\${dl.peers} peers</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-icon">⏱️</span>
+                        <span class="stat-value">\${isDownloading ? dl.eta : (isDone ? 'Concluído' : '--:--')}</span>
+                    </div>
+                </div>
+            \`;
+        }
+
         setInterval(loadStatus, 2000);
         loadStatus();
         
-        // Enter to submit
         document.getElementById('magnet').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') uploadMagnet();
         });
