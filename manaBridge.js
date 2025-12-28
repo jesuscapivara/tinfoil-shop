@@ -2,6 +2,10 @@ import express from "express";
 import WebTorrent from "webtorrent";
 import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
+import dotenv from "dotenv";
+
+// Carrega .env ANTES de ler as variáveis
+dotenv.config();
 
 const router = express.Router();
 
@@ -9,6 +13,14 @@ const router = express.Router();
 const ROOT_GAMES_FOLDER = "/Games_Switch";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASS = process.env.ADMIN_PASS;
+
+// Debug: Log para verificar se as variáveis foram carregadas
+console.log(
+  `[ManaBridge] ADMIN_EMAIL: ${ADMIN_EMAIL ? "✅ Configurado" : "❌ FALTANDO"}`
+);
+console.log(
+  `[ManaBridge] ADMIN_PASS: ${ADMIN_PASS ? "✅ Configurado" : "❌ FALTANDO"}`
+);
 
 const dbx = new Dropbox({
   clientId: process.env.DROPBOX_APP_KEY,
