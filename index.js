@@ -75,16 +75,17 @@ app.get("/api", async (req, res) => {
 
     const tinfoilJson = {
       files: [],
-      success: "Mana Shop v6",
+      success: "Mana Shop v7 (Auto-Clean)",
     };
 
     files.forEach((file) => {
-      // A MÁGICA ACONTECE AQUI:
-      // 1. Pegamos o nome real (ex: "Hades [v0].nsz")
-      // 2. Codificamos para URL (ex: "Hades%20%5Bv0%5D.nsz")
-      // 3. O Tinfoil VÊ o nome do jogo na URL e consegue extrair o TitleID para baixar a capa
+      // SANITIZAÇÃO: Remove "(X.XX GB)" ou "(X.XX MB)" do nome
+      // Isso permite que o Tinfoil leia corretamente o [TitleID][Version]
+      // Antes: "Hades 2 [0100A...][v0] (4.22 GB).nsz"
+      // Depois: "Hades 2 [0100A...][v0].nsz"
+      const cleanName = file.name.replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "");
 
-      const safeFileName = encodeURIComponent(file.name);
+      const safeFileName = encodeURIComponent(cleanName);
       const path64 = toBase64(file.path_lower);
 
       // A URL final fica: https://.../download/Hades%20[v0].nsz?data=XYZ
@@ -93,7 +94,7 @@ app.get("/api", async (req, res) => {
       tinfoilJson.files.push({
         url: downloadUrl,
         size: file.size,
-        name: file.name, // Nome visual
+        name: cleanName, // Nome LIMPO para o Tinfoil processar o TitleID
       });
     });
 
@@ -121,5 +122,5 @@ app.get("/download/:filename", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Mana Shop v6 (Real Names) rodando.`);
+  console.log(`🚀 Mana Shop v7 (Auto-Clean) rodando.`);
 });
