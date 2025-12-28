@@ -23,11 +23,12 @@ const dbx = new Dropbox({
 
 const app = express();
 
-// Middleware para confiar no Proxy da Discloud (Importante para req.protocol funcionar)
+// Confia no Proxy (Cloudflare/Discloud) para pegar o IP e Host corretos
 app.enable("trust proxy");
 
 app.use((req, res, next) => {
   req.setTimeout(60000);
+  // Log limpo apenas para downloads
   if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
   next();
 });
@@ -35,7 +36,7 @@ app.use((req, res, next) => {
 const toBase64 = (str) => Buffer.from(str).toString("base64");
 const fromBase64 = (str) => Buffer.from(str, "base64").toString("utf-8");
 
-// Cache Simples
+// Cache
 let fileCache = null;
 let lastCacheTime = 0;
 const CACHE_DURATION = 15 * 60 * 1000;
@@ -44,7 +45,7 @@ async function getAllFilesFromDropbox() {
   const now = Date.now();
   if (fileCache && now - lastCacheTime < CACHE_DURATION) return fileCache;
 
-  log.info("🔄 Atualizando Cache Dropbox...");
+  log.info("🔄 Refreshing Cache...");
   let allFiles = [];
   try {
     let response = await dbx.filesListFolder({
@@ -70,26 +71,25 @@ async function getAllFilesFromDropbox() {
     lastCacheTime = now;
     return validFiles;
   } catch (e) {
-    log.error("Erro Scan:", e);
+    log.error("Scan Error:", e);
     return [];
   }
 }
 
-// ============== ROTA API (AUTO-DISCOVERY) ==============
+// ============== ROTA API ==============
 app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
 
-    // AUTO-DISCOVERY: Pega o domínio e protocolo direto da requisição
-    // Não depende mais do .env DOMINIO
-    const host = req.get("host"); // ex: tinfoilapp.discloud.app
-    const protocol = req.protocol; // ex: https
-
-    const baseUrl = `${protocol}://${host}`;
+    // CORREÇÃO CRÍTICA V12:
+    // Forçamos HTTPS. Não confiamos no req.protocol vindo do proxy.
+    // Se req.get('host') falhar, usamos o fallback do .env
+    const host = req.get("host") || process.env.DOMINIO || `localhost:${PORT}`;
+    const baseUrl = `https://${host}`;
 
     const tinfoilJson = {
       files: [],
-      success: `Mana Shop v11 (Auto-Host: ${host})`,
+      success: `Mana Shop v12 (Secure HTTPS: ${host})`,
     };
 
     files.forEach((file) => {
@@ -110,8 +110,8 @@ app.get("/api", async (req, res) => {
 
     res.json(tinfoilJson);
   } catch (error) {
-    log.error("Erro API:", error);
-    res.status(500).json({ error: "Erro API" });
+    log.error("API Error:", error);
+    res.status(500).json({ error: "Server Error" });
   }
 });
 
@@ -123,31 +123,30 @@ app.get("/download/:filename", async (req, res) => {
   try {
     const realPath = fromBase64(encodedPath);
 
-    // Pega link do Dropbox
+    // Gera link do Dropbox
     const tempLink = await dbx.filesGetTemporaryLink({ path: realPath });
     let finalLink = tempLink.result.link;
 
-    // Força DL=1 (Download direto)
+    // Força DL=1
     if (finalLink.includes("?")) {
       finalLink += "&dl=1";
     } else {
       finalLink += "?dl=1";
     }
 
-    log.info(
-      `🔗 Redirecionando para Dropbox: ${finalLink.substring(0, 30)}...`
-    );
-
-    // Headers Binários
+    // Headers Binários (Instrui o Tinfoil a tratar como arquivo)
     res.setHeader("Content-Type", "application/octet-stream");
+
+    // Redirect 302 (Temporary Redirect) - O mais correto para links assinados
     res.redirect(302, finalLink);
   } catch (error) {
-    log.error(`❌ Erro Link:`, error);
-    if (error.status === 409) return res.status(404).send("Path not found");
-    res.status(500).send("Erro");
+    log.error(`❌ Link Generation Failed:`, error);
+    if (error.status === 409)
+      return res.status(404).send("File path not found in Dropbox");
+    res.status(500).send("Internal Error");
   }
 });
 
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v11 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v12 (Force HTTPS) running on port ${PORT}`);
 });
