@@ -3,6 +3,7 @@ import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import manaBridge from "./manaBridge.js";
+import { connectDB, saveGameCache, getGameCache } from "./database.js";
 
 dotenv.config();
 
@@ -149,6 +150,9 @@ async function buildGameIndex() {
     lastCacheTime = Date.now();
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
+    // Salva no MongoDB para persistência
+    await saveGameCache(cachedGames);
+
     log.info(
       `✅ INDEXAÇÃO CONCLUÍDA em ${duration}s! ${cachedGames.length} jogos prontos.`
     );
@@ -179,7 +183,7 @@ app.get("/api", (req, res) => {
 
   res.json({
     files: cachedGames,
-    success: `Mana Shop v19 (Online | ${cachedGames.length} jogos)`,
+    success: `Capivara Shop ( ${cachedGames.length} jogos)`,
   });
 });
 
@@ -189,10 +193,48 @@ app.get("/refresh", (req, res) => {
   res.send("Indexação iniciada em background. Acompanhe os logs.");
 });
 
+// Endpoint para status da indexação (usado pelo admin dashboard)
+app.get("/indexing-status", (req, res) => {
+  res.json({
+    isIndexing,
+    progress: indexingProgress,
+    totalGames: cachedGames.length,
+    lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
+  });
+});
+
 // --- STARTUP ---
 
-app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v19 rodando na porta ${PORT}`);
-  // DISPARA A INDEXAÇÃO IMEDIATAMENTE AO LIGAR O SERVIDOR
-  buildGameIndex();
+async function startServer() {
+  // 1. Conecta ao MongoDB
+  await connectDB();
+
+  // 2. Tenta carregar cache do MongoDB
+  const savedCache = await getGameCache();
+  if (savedCache.games.length > 0) {
+    cachedGames = savedCache.games;
+    lastCacheTime = savedCache.lastUpdate || Date.now();
+    log.info(`📚 Cache carregado do MongoDB: ${cachedGames.length} jogos`);
+  }
+
+  // 3. Inicia o servidor
+  app.listen(PORT, () => {
+    log.info(`🚀 Mana Shop v20 rodando na porta ${PORT}`);
+
+    // 4. Se não tem cache OU cache muito antigo, re-indexa
+    const cacheAge = Date.now() - lastCacheTime;
+    if (cachedGames.length === 0 || cacheAge > CACHE_DURATION) {
+      log.info("🔄 Iniciando indexação...");
+      buildGameIndex();
+    } else {
+      log.info(
+        `✅ Usando cache existente (${Math.floor(cacheAge / 60000)} min atrás)`
+      );
+    }
+  });
+}
+
+startServer().catch((err) => {
+  log.error("Falha ao iniciar servidor:", err);
+  process.exit(1);
 });

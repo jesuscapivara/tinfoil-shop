@@ -5,6 +5,7 @@ import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import multer from "multer";
 import { loginTemplate, dashboardTemplate } from "./templates.js";
+import { saveDownloadHistory, getDownloadHistory } from "./database.js";
 
 dotenv.config();
 
@@ -53,8 +54,31 @@ client.on("error", (err) =>
 );
 
 let activeDownloads = {};
-let completedDownloads = []; // Histórico de downloads finalizados
-const MAX_COMPLETED = 20; // Mantém últimos 20 finalizados
+let completedDownloads = []; // Histórico de downloads finalizados (carregado do MongoDB)
+const MAX_COMPLETED = 50; // Mantém últimos 50 finalizados
+
+// Carrega histórico do MongoDB na inicialização
+(async () => {
+  try {
+    const history = await getDownloadHistory(MAX_COMPLETED);
+    if (history.length > 0) {
+      completedDownloads = history.map((h) => ({
+        id: h._id?.toString() || h.id,
+        name: h.name,
+        files: h.files,
+        size: h.size,
+        folder: h.folder,
+        completedAt: h.completedAt,
+        duration: h.duration,
+      }));
+      console.log(
+        `[DB] 📥 Histórico carregado: ${completedDownloads.length} downloads`
+      );
+    }
+  } catch (err) {
+    console.log("[DB] ⚠️ Não foi possível carregar histórico do MongoDB");
+  }
+})();
 
 // --- HELPERS ---
 const generateToken = (email, pass) =>
@@ -388,7 +412,13 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
               (Date.now() - new Date(activeDownloads[id].startedAt).getTime()) /
                 1000
             ),
+            source: activeDownloads[id].source || "magnet",
           };
+
+          // Salva no MongoDB
+          saveDownloadHistory(completedEntry).catch(() => {});
+
+          // Adiciona na memória
           completedDownloads.unshift(completedEntry);
           if (completedDownloads.length > MAX_COMPLETED) {
             completedDownloads.pop();
@@ -600,6 +630,7 @@ router.post("/bridge/upload", requireAuth, async (req, res) => {
     error: null,
   };
 
+  activeDownloads[id].source = "magnet";
   log(`📨 Magnet recebido: ${magnet.substring(0, 60)}...`, "API");
   processTorrent(magnet, id, "magnet");
   res.json({ success: true, id });
@@ -642,6 +673,7 @@ router.post(
       error: null,
     };
 
+    activeDownloads[id].source = "torrent-file";
     log(
       `📨 Arquivo .torrent recebido: ${req.file.originalname} (${req.file.size} bytes)`,
       "API"

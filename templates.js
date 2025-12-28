@@ -193,6 +193,11 @@ export function dashboardTemplate() {
             font-size: 0.65rem;
             font-weight: 600;
         }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
         .logout { 
             color: var(--text-muted); 
             text-decoration: none; 
@@ -200,6 +205,81 @@ export function dashboardTemplate() {
             transition: color 0.2s;
         }
         .logout:hover { color: var(--error); }
+        
+        /* Index Status Box */
+        .index-status {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .index-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .index-title {
+            color: var(--white);
+            font-weight: 500;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .index-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .index-meta span {
+            color: var(--text);
+        }
+        .refresh-btn {
+            padding: 10px 18px;
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .refresh-btn:hover {
+            background: var(--primary);
+            color: white;
+        }
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .refresh-btn.loading .icon {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .status-badge {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .status-badge.online {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+        .status-badge.indexing {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--warning);
+        }
         
         /* Tabs */
         .tabs { display: flex; gap: 6px; margin-bottom: 15px; }
@@ -484,8 +564,27 @@ export function dashboardTemplate() {
     <div class="container">
         <header>
             <h1>🎮 Mana Bridge <span class="badge">v6.0</span></h1>
-            <a href="/admin/logout" class="logout">Sair</a>
+            <div class="header-actions">
+                <a href="/admin/logout" class="logout">Sair</a>
+            </div>
         </header>
+
+        <div class="index-status">
+            <div class="index-info">
+                <div class="index-title">
+                    📚 Índice de Jogos
+                    <span id="index-status-badge" class="status-badge online">Online</span>
+                </div>
+                <div class="index-meta">
+                    <span id="index-games-count">--</span> jogos indexados • 
+                    Última atualização: <span id="index-last-update">--</span>
+                    <span id="index-progress-text"></span>
+                </div>
+            </div>
+            <button id="refresh-btn" class="refresh-btn" onclick="refreshIndex()">
+                <span class="icon">🔄</span> Atualizar Índice
+            </button>
+        </div>
 
         <div class="tabs">
             <button class="tab active" onclick="switchInputTab('magnet')">🔗 Magnet</button>
@@ -815,6 +914,75 @@ export function dashboardTemplate() {
         document.getElementById('magnet').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') uploadMagnet();
         });
+
+        // ═══════════════════════════════════════════════
+        // INDEX STATUS & REFRESH
+        // ═══════════════════════════════════════════════
+        
+        async function loadIndexStatus() {
+            try {
+                const res = await fetch('/indexing-status');
+                const data = await res.json();
+                
+                const badge = document.getElementById('index-status-badge');
+                const countEl = document.getElementById('index-games-count');
+                const lastUpdateEl = document.getElementById('index-last-update');
+                const progressEl = document.getElementById('index-progress-text');
+                const btn = document.getElementById('refresh-btn');
+                
+                countEl.textContent = data.totalGames || 0;
+                
+                if (data.lastUpdate) {
+                    const date = new Date(data.lastUpdate);
+                    lastUpdateEl.textContent = date.toLocaleTimeString('pt-BR', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                    }) + ' - ' + date.toLocaleDateString('pt-BR');
+                } else {
+                    lastUpdateEl.textContent = 'Nunca';
+                }
+                
+                if (data.isIndexing) {
+                    badge.className = 'status-badge indexing';
+                    badge.textContent = 'Indexando...';
+                    progressEl.textContent = ' • ' + data.progress;
+                    btn.disabled = true;
+                    btn.classList.add('loading');
+                    btn.innerHTML = '<span class="icon">🔄</span> Indexando...';
+                } else {
+                    badge.className = 'status-badge online';
+                    badge.textContent = 'Online';
+                    progressEl.textContent = '';
+                    btn.disabled = false;
+                    btn.classList.remove('loading');
+                    btn.innerHTML = '<span class="icon">🔄</span> Atualizar Índice';
+                }
+            } catch(e) {
+                console.error('Erro ao carregar status do índice:', e);
+            }
+        }
+        
+        async function refreshIndex() {
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.classList.add('loading');
+            btn.innerHTML = '<span class="icon">🔄</span> Iniciando...';
+            
+            try {
+                await fetch('/refresh');
+                // Espera um pouco e recarrega o status
+                setTimeout(loadIndexStatus, 500);
+            } catch(e) {
+                console.error('Erro ao iniciar refresh:', e);
+                btn.disabled = false;
+                btn.classList.remove('loading');
+                btn.innerHTML = '<span class="icon">🔄</span> Atualizar Índice';
+            }
+        }
+        
+        // Carrega status inicial e atualiza a cada 2 segundos
+        loadIndexStatus();
+        setInterval(loadIndexStatus, 2000);
     </script>
 </body>
 </html>
