@@ -521,6 +521,16 @@ export function dashboardTemplate() {
             border-radius: 4px;
         }
         
+        .status-text {
+            font-size: 0.75rem;
+            color: var(--cyan);
+            margin-top: 10px;
+            padding: 8px 10px;
+            background: rgba(6, 182, 212, 0.08);
+            border-radius: 4px;
+            text-align: center;
+        }
+        
         /* Completed Cards */
         .completed-card {
             background: var(--card);
@@ -968,6 +978,28 @@ export function dashboardTemplate() {
 
             const downloadClass = dl.done ? 'done' : (isDownloading ? 'download' : 'inactive');
             const uploadClass = up.done ? 'done' : (isUploading ? 'upload' : 'inactive');
+            
+            // Calcula progresso do upload baseado no arquivo atual
+            let uploadDisplayPercent = up.percent;
+            if (isUploading && up.currentFileProgress > 0) {
+                // Progresso = (arquivos completos + progresso do atual) / total
+                const completedFiles = up.fileIndex - 1;
+                const currentProgress = up.currentFileProgress / 100;
+                uploadDisplayPercent = ((completedFiles + currentProgress) / up.totalFiles * 100).toFixed(1);
+            }
+
+            // Status dinâmico baseado na fase
+            let statusText = '';
+            if (isConnecting) {
+                statusText = '🔍 Procurando peers...';
+            } else if (isDownloading) {
+                statusText = \`📥 \${dl.downloaded} / \${dl.total} • \${dl.peers} peers • ETA: \${dl.eta}\`;
+            } else if (isUploading) {
+                const fileInfo = up.totalFiles > 1 ? \`Arquivo \${up.fileIndex}/\${up.totalFiles}\` : '';
+                statusText = \`📤 \${up.status || 'Enviando...'} \${fileInfo}\`;
+            } else if (isDone) {
+                statusText = '✅ Disponível na loja!';
+            }
 
             return \`
                 <div class="card-main">
@@ -989,12 +1021,14 @@ export function dashboardTemplate() {
                     <div class="progress-group">
                         <div class="progress-label">
                             <span class="title"><span class="icon">📤</span> Upload Dropbox</span>
-                            <span class="value">\${up.percent}% \${up.done ? '✓' : ''}</span>
+                            <span class="value">\${uploadDisplayPercent}% \${up.done ? '✓' : ''}</span>
                         </div>
                         <div class="progress-bar">
-                            <div class="progress-fill \${uploadClass}" style="width: \${up.percent}%"></div>
+                            <div class="progress-fill \${uploadClass}" style="width: \${uploadDisplayPercent}%"></div>
                         </div>
                     </div>
+                    
+                    <div class="status-text">\${statusText}</div>
                     
                     \${isError ? \`<div class="error-msg">❌ \${item.error}</div>\` : ''}
                 </div>
@@ -1006,11 +1040,11 @@ export function dashboardTemplate() {
                     </div>
                     <div class="stat">
                         <span class="stat-icon">📊</span>
-                        <span class="stat-value">\${dl.downloaded} / \${dl.total}</span>
+                        <span class="stat-value">\${isUploading ? (up.uploaded + ' / ' + up.total) : (dl.downloaded + ' / ' + dl.total)}</span>
                     </div>
                     <div class="stat">
-                        <span class="stat-icon">👥</span>
-                        <span class="stat-value">\${dl.peers} peers</span>
+                        <span class="stat-icon">\${isUploading ? '📁' : '👥'}</span>
+                        <span class="stat-value">\${isUploading ? (up.currentFile ? up.currentFile.substring(0, 20) + '...' : '--') : (dl.peers + ' peers')}</span>
                     </div>
                     <div class="stat">
                         <span class="stat-icon">⏱️</span>

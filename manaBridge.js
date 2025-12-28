@@ -183,8 +183,10 @@ router.get("/bridge/status", requireAuth, (req, res) => {
       uploaded: d.uploadedBytes || "0 MB",
       total: d.uploadTotal || "-- MB",
       currentFile: d.currentFile || "",
+      currentFileProgress: d.currentFileProgress || 0,
       fileIndex: d.fileIndex || 0,
       totalFiles: d.totalFiles || 0,
+      status: d.uploadStatus || "",
       done: d.uploadDone || false,
     },
     error: d.error || null,
@@ -495,13 +497,13 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
 }
 
 // ═══════════════════════════════════════════════
-// SMART STREAM UPLOAD (Buffer de 5MB)
+// SMART STREAM UPLOAD (Buffer de 20MB)
 // ═══════════════════════════════════════════════
 // Usa buffering inteligente para não estourar a RAM
 // Pausa o stream, envia o chunk, e resume
-// ⚠️ 5MB é mais seguro para containers com pouca RAM
+// ✅ 20MB é bom equilíbrio entre velocidade e uso de RAM
 
-const SMART_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB por chunk (otimizado para 1.5GB RAM)
+const SMART_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB por chunk (otimizado após testes)
 
 async function uploadFileToDropbox(
   file,
@@ -587,17 +589,25 @@ async function uploadWithSmartStream(
 ) {
   return new Promise((resolve, reject) => {
     const fileSize = file.length;
+    const fileName = file.name;
     let sessionId = null;
     let offset = 0;
     let buffer = Buffer.alloc(0);
     let chunkNum = 0;
+    let lastChunkTime = Date.now();
+    let totalChunks = Math.ceil(fileSize / SMART_CHUNK_SIZE);
 
     const stream = file.createReadStream();
+
+    // Atualiza status inicial
+    activeDownloads[downloadId].currentFile = fileName;
+    activeDownloads[downloadId].fileIndex = currentIndex + 1;
+    activeDownloads[downloadId].uploadStatus = `Preparando upload...`;
 
     log(
       `📤 Smart Stream: ${(fileSize / 1024 / 1024).toFixed(
         2
-      )} MB em chunks de 10MB`,
+      )} MB em ~${totalChunks} chunks de 20MB`,
       "UPLOAD"
     );
 
@@ -605,7 +615,7 @@ async function uploadWithSmartStream(
       // Acumula no buffer
       buffer = Buffer.concat([buffer, chunk]);
 
-      // Se o buffer encheu (10MB), hora de enviar!
+      // Se o buffer encheu (5MB), hora de enviar!
       if (buffer.length >= SMART_CHUNK_SIZE) {
         // PAUSA o stream para não estourar a memória
         stream.pause();
@@ -615,8 +625,18 @@ async function uploadWithSmartStream(
           const remaining = buffer.slice(SMART_CHUNK_SIZE);
           chunkNum++;
 
+          // Calcula velocidade
+          const now = Date.now();
+          const elapsed = (now - lastChunkTime) / 1000;
+          const speed =
+            elapsed > 0 ? SMART_CHUNK_SIZE / 1024 / 1024 / elapsed : 0;
+          lastChunkTime = now;
+
           if (offset === 0) {
             // Primeiro chunk: inicia sessão
+            activeDownloads[
+              downloadId
+            ].uploadStatus = `Conectando ao Dropbox...`;
             log(`   🔗 Iniciando sessão Dropbox...`, "UPLOAD");
             const res = await dbx.filesUploadSessionStart({
               close: false,
@@ -639,15 +659,25 @@ async function uploadWithSmartStream(
           offset += chunkToSend.length;
           buffer = remaining;
 
-          // Atualiza progresso visual
-          const percent = ((offset / fileSize) * 100).toFixed(1);
-          activeDownloads[downloadId].uploadSpeed = `Chunk ${chunkNum}`;
+          // Atualiza progresso visual para o frontend
+          const filePercent = ((offset / fileSize) * 100).toFixed(1);
+          const uploadedMB = (offset / 1024 / 1024).toFixed(1);
+          const totalMB = (fileSize / 1024 / 1024).toFixed(1);
+
+          activeDownloads[downloadId].uploadSpeed =
+            speed > 0 ? `${speed.toFixed(1)} MB/s` : "-- MB/s";
+          activeDownloads[
+            downloadId
+          ].uploadStatus = `Enviando chunk ${chunkNum}/${totalChunks}`;
+          activeDownloads[downloadId].currentFileProgress =
+            parseFloat(filePercent);
+          activeDownloads[downloadId].uploadedBytes = `${uploadedMB} MB`;
+          activeDownloads[downloadId].uploadTotal = `${totalMB} MB`;
+
           log(
-            `   📦 Chunk ${chunkNum}: ${percent}% (${(
-              offset /
-              1024 /
-              1024
-            ).toFixed(1)} MB)`,
+            `   📦 Chunk ${chunkNum}/${totalChunks}: ${filePercent}% (${uploadedMB}/${totalMB} MB) @ ${speed.toFixed(
+              1
+            )} MB/s`,
             "UPLOAD"
           );
 
