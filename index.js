@@ -8,7 +8,6 @@ dotenv.config();
 const PORT = process.env.PORT || 8080;
 const ROOT_GAMES_FOLDER = "/Games_Switch";
 
-// Logs
 const log = {
   info: (msg) => console.log(`[INFO] ${msg}`),
   error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
@@ -22,13 +21,10 @@ const dbx = new Dropbox({
 });
 
 const app = express();
-
-// Confia no Proxy (Cloudflare/Discloud) para pegar o IP e Host corretos
 app.enable("trust proxy");
 
 app.use((req, res, next) => {
   req.setTimeout(60000);
-  // Log limpo apenas para downloads
   if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
   next();
 });
@@ -45,7 +41,7 @@ async function getAllFilesFromDropbox() {
   const now = Date.now();
   if (fileCache && now - lastCacheTime < CACHE_DURATION) return fileCache;
 
-  log.info("🔄 Refreshing Cache...");
+  log.info("🔄 Atualizando Cache...");
   let allFiles = [];
   try {
     let response = await dbx.filesListFolder({
@@ -80,16 +76,12 @@ async function getAllFilesFromDropbox() {
 app.get("/api", async (req, res) => {
   try {
     const files = await getAllFilesFromDropbox();
-
-    // CORREÇÃO CRÍTICA V12:
-    // Forçamos HTTPS. Não confiamos no req.protocol vindo do proxy.
-    // Se req.get('host') falhar, usamos o fallback do .env
     const host = req.get("host") || process.env.DOMINIO || `localhost:${PORT}`;
     const baseUrl = `https://${host}`;
 
     const tinfoilJson = {
       files: [],
-      success: `Mana Shop v12 (Secure HTTPS: ${host})`,
+      success: `Mana Shop v13 (Direct CDN)`,
     };
 
     files.forEach((file) => {
@@ -115,38 +107,67 @@ app.get("/api", async (req, res) => {
   }
 });
 
-// ============== ROTA DOWNLOAD ==============
+// ============== ROTA DOWNLOAD (ARQUITETURA NOVA) ==============
 app.get("/download/:filename", async (req, res) => {
   const encodedPath = req.query.data;
   if (!encodedPath) return res.status(400).send("Missing data");
 
   try {
     const realPath = fromBase64(encodedPath);
+    let sharedLink = "";
 
-    // Gera link do Dropbox
-    const tempLink = await dbx.filesGetTemporaryLink({ path: realPath });
-    let finalLink = tempLink.result.link;
-
-    // Força DL=1
-    if (finalLink.includes("?")) {
-      finalLink += "&dl=1";
-    } else {
-      finalLink += "?dl=1";
+    // ESTRATÉGIA BLINDADA: Tenta criar link, se já existir, pega o existente.
+    try {
+      // Tenta criar um link novo
+      const response = await dbx.sharingCreateSharedLinkWithSettings({
+        path: realPath,
+      });
+      sharedLink = response.result.url;
+    } catch (shareError) {
+      // Se der erro "shared_link_already_exists", buscamos o link que já existe
+      if (
+        shareError.error &&
+        shareError.error[".tag"] === "shared_link_already_exists"
+      ) {
+        const listResponse = await dbx.sharingListSharedLinks({
+          path: realPath,
+          direct_only: true,
+        });
+        if (listResponse.result.links.length > 0) {
+          sharedLink = listResponse.result.links[0].url;
+        } else {
+          throw new Error("Falha ao recuperar link existente.");
+        }
+      } else {
+        throw shareError;
+      }
     }
 
-    // Headers Binários (Instrui o Tinfoil a tratar como arquivo)
-    res.setHeader("Content-Type", "application/octet-stream");
+    // TRANSFORMAÇÃO MÁGICA PARA CDN (DIRECT DOWNLOAD)
+    // Link original: https://www.dropbox.com/s/xyz/game.nsp?dl=0
+    // Link CDN:      https://dl.dropboxusercontent.com/s/xyz/game.nsp
 
-    // Redirect 302 (Temporary Redirect) - O mais correto para links assinados
-    res.redirect(302, finalLink);
+    // 1. Troca o dominio
+    let directLink = sharedLink.replace(
+      "www.dropbox.com",
+      "dl.dropboxusercontent.com"
+    );
+
+    // 2. Remove parâmetros antigos (?dl=0)
+    directLink = directLink.split("?")[0];
+
+    // 3. Log para validação
+    log.info(`🔗 CDN Link: ${directLink}`);
+
+    // 4. Redirect
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.redirect(302, directLink);
   } catch (error) {
-    log.error(`❌ Link Generation Failed:`, error);
-    if (error.status === 409)
-      return res.status(404).send("File path not found in Dropbox");
-    res.status(500).send("Internal Error");
+    log.error(`❌ Download Error:`, error);
+    res.status(500).send("Erro ao gerar link CDN.");
   }
 });
 
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v12 (Force HTTPS) running on port ${PORT}`);
+  log.info(`🚀 Mana Shop v13 rodando na porta ${PORT}`);
 });
