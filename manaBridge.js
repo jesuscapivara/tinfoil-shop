@@ -4,9 +4,23 @@ import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import { Readable } from "stream";
+import multer from "multer";
 
 // Carrega .env ANTES de ler as variáveis
 dotenv.config();
+
+// Configuração do Multer para upload de arquivos .torrent
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max para arquivo .torrent
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.endsWith(".torrent")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Apenas arquivos .torrent são permitidos"), false);
+    }
+  },
+});
 
 const router = express.Router();
 
@@ -168,7 +182,71 @@ router.get("/bridge/status", requireAuth, (req, res) => {
   res.json(list);
 });
 
-// --- API DE UPLOAD (PROTEGIDA) ---
+// --- FUNÇÃO COMUM PARA PROCESSAR TORRENT ---
+function processTorrent(torrentInput, id, inputType = "magnet") {
+  console.log(`[ManaBridge] 🚀 Processando ${inputType}: ${id}`);
+
+  client.add(torrentInput, { path: "/tmp" }, (torrent) => {
+    console.log(`[ManaBridge] Torrent conectado: ${torrent.name}`);
+    activeDownloads[id].name = torrent.name;
+    activeDownloads[id].state = "Baixando Metadata...";
+
+    // Seleciona o maior arquivo (jogo)
+    const file = torrent.files.reduce((a, b) => (a.length > b.length ? a : b));
+
+    console.log(
+      `[ManaBridge] Arquivo selecionado: ${file.name} (${(
+        file.length /
+        1024 /
+        1024 /
+        1024
+      ).toFixed(2)} GB)`
+    );
+
+    if (!file.name.match(/\.(nsp|nsz|xci)$/i)) {
+      activeDownloads[id].state = "❌ Erro: Arquivo não é um jogo Switch";
+      console.log("[ManaBridge] ❌ Arquivo não é um jogo Switch");
+      torrent.destroy();
+      return;
+    }
+
+    activeDownloads[id].state = "🚀 Preparando upload...";
+    activeDownloads[id].name = file.name;
+
+    const fileSizeMB = file.length / 1024 / 1024;
+    console.log(`[ManaBridge] Tamanho: ${fileSizeMB.toFixed(2)} MB`);
+
+    if (fileSizeMB > 150) {
+      uploadLargeFile(file, id, torrent);
+    } else {
+      uploadSmallFile(file, id, torrent);
+    }
+
+    torrent.on("download", () => {
+      activeDownloads[id].progressPercent = (torrent.progress * 100).toFixed(1);
+      activeDownloads[id].speed =
+        (torrent.downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
+    });
+
+    torrent.on("error", (err) => {
+      console.error("[ManaBridge] Erro no torrent:", err);
+      activeDownloads[id].state = `❌ Erro: ${err.message}`;
+    });
+  });
+
+  // Timeout para torrents que não conectam (2 minutos)
+  setTimeout(() => {
+    if (
+      activeDownloads[id] &&
+      activeDownloads[id].state === "Conectando aos peers..."
+    ) {
+      activeDownloads[id].state = "❌ Timeout: Nenhum peer encontrado";
+      console.log("[ManaBridge] ❌ Timeout no torrent");
+    }
+  }, 120000);
+}
+
+// --- API DE UPLOAD VIA MAGNET LINK (PROTEGIDA) ---
 router.post("/bridge/upload", requireAuth, async (req, res) => {
   const magnet = req.body.magnet;
   if (!magnet) return res.status(400).json({ error: "Magnet link vazio" });
@@ -183,81 +261,51 @@ router.post("/bridge/upload", requireAuth, async (req, res) => {
     speed: "0 MB/s",
   };
 
-  console.log(`[ManaBridge] 🚀 Iniciando download: ${id}`);
-
   try {
-    client.add(magnet, { path: "/tmp" }, (torrent) => {
-      console.log(`[ManaBridge] Torrent conectado: ${torrent.name}`);
-      activeDownloads[id].name = torrent.name;
-      activeDownloads[id].state = "Baixando Metadata...";
-
-      // Seleciona o maior arquivo (jogo)
-      const file = torrent.files.reduce((a, b) =>
-        a.length > b.length ? a : b
-      );
-
-      console.log(
-        `[ManaBridge] Arquivo selecionado: ${file.name} (${(
-          file.length /
-          1024 /
-          1024 /
-          1024
-        ).toFixed(2)} GB)`
-      );
-
-      if (!file.name.match(/\.(nsp|nsz|xci)$/i)) {
-        activeDownloads[id].state = "❌ Erro: Arquivo não é um jogo Switch";
-        console.log("[ManaBridge] ❌ Arquivo não é um jogo Switch");
-        torrent.destroy();
-        return;
-      }
-
-      activeDownloads[id].state = "🚀 Preparando upload...";
-      activeDownloads[id].name = file.name;
-
-      // Para arquivos grandes, usamos Upload Session do Dropbox
-      const fileSizeMB = file.length / 1024 / 1024;
-      console.log(`[ManaBridge] Tamanho: ${fileSizeMB.toFixed(2)} MB`);
-
-      if (fileSizeMB > 150) {
-        // Upload em sessão para arquivos grandes
-        uploadLargeFile(file, id, torrent);
-      } else {
-        // Upload direto para arquivos pequenos
-        uploadSmallFile(file, id, torrent);
-      }
-
-      torrent.on("download", () => {
-        activeDownloads[id].progressPercent = (torrent.progress * 100).toFixed(
-          1
-        );
-        activeDownloads[id].speed =
-          (torrent.downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
-      });
-
-      torrent.on("error", (err) => {
-        console.error("[ManaBridge] Erro no torrent:", err);
-        activeDownloads[id].state = `❌ Erro: ${err.message}`;
-      });
-    });
-
-    // Timeout para magnet links que não conectam
-    setTimeout(() => {
-      if (
-        activeDownloads[id] &&
-        activeDownloads[id].state === "Conectando aos peers..."
-      ) {
-        activeDownloads[id].state = "❌ Timeout: Nenhum peer encontrado";
-        console.log("[ManaBridge] ❌ Timeout no magnet link");
-      }
-    }, 60000);
+    processTorrent(magnet, id, "magnet");
+    res.json({ success: true, id });
   } catch (err) {
-    console.error("[ManaBridge] Erro ao adicionar torrent:", err);
+    console.error("[ManaBridge] Erro ao adicionar magnet:", err);
     activeDownloads[id].state = `❌ Erro: ${err.message}`;
+    res.status(500).json({ error: err.message });
   }
-
-  res.json({ success: true, id });
 });
+
+// --- API DE UPLOAD VIA ARQUIVO .TORRENT (PROTEGIDA) ---
+router.post(
+  "/bridge/upload-torrent",
+  requireAuth,
+  upload.single("torrentFile"),
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "Arquivo .torrent não enviado" });
+    }
+
+    const id = Date.now().toString();
+
+    activeDownloads[id] = {
+      id,
+      name: req.file.originalname,
+      state: "Conectando aos peers...",
+      progressPercent: 0,
+      speed: "0 MB/s",
+    };
+
+    console.log(
+      `[ManaBridge] 📁 Arquivo .torrent recebido: ${req.file.originalname}`
+    );
+
+    try {
+      // WebTorrent aceita Buffer diretamente
+      processTorrent(req.file.buffer, id, "torrent file");
+      res.json({ success: true, id });
+    } catch (err) {
+      console.error("[ManaBridge] Erro ao processar .torrent:", err);
+      activeDownloads[id].state = `❌ Erro: ${err.message}`;
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 // --- UPLOAD PEQUENO (< 150MB) ---
 async function uploadSmallFile(file, id, torrent) {
@@ -496,7 +544,7 @@ function dashboardTemplate() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Mana Shop | Dashboard</title>
         <style>
-            :root { --bg: #0f172a; --card: #1e293b; --text: #94a3b8; --white: #f8fafc; --primary: #6366f1; --success: #10b981; --error: #ef4444; }
+            :root { --bg: #0f172a; --card: #1e293b; --text: #94a3b8; --white: #f8fafc; --primary: #6366f1; --success: #10b981; --error: #ef4444; --warning: #f59e0b; }
             body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
             .container { max-width: 800px; margin: 0 auto; }
             
@@ -507,12 +555,30 @@ function dashboardTemplate() {
             .logout { color: var(--text); text-decoration: none; font-size: 0.9rem; }
             .logout:hover { color: var(--error); }
             
+            /* Tabs */
+            .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+            .tab { padding: 10px 20px; background: var(--card); border: none; border-radius: 8px; color: var(--text); cursor: pointer; transition: 0.2s; }
+            .tab.active { background: var(--primary); color: white; }
+            .tab:hover:not(.active) { background: #334155; }
+            
             /* Add Section */
-            .add-box { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; gap: 10px; flex-wrap: wrap; }
-            input { flex: 1; padding: 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; min-width: 200px; }
+            .add-box { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+            .input-row { display: flex; gap: 10px; flex-wrap: wrap; }
+            input[type="text"] { flex: 1; padding: 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; min-width: 200px; }
             button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
             button:hover { opacity: 0.9; }
             button:disabled { opacity: 0.5; cursor: not-allowed; }
+            
+            /* File Upload */
+            .upload-zone { display: none; border: 2px dashed #475569; border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; transition: 0.2s; }
+            .upload-zone:hover, .upload-zone.dragover { border-color: var(--primary); background: rgba(99, 102, 241, 0.1); }
+            .upload-zone.active { display: block; }
+            .upload-zone input { display: none; }
+            .upload-zone .icon { font-size: 3rem; margin-bottom: 10px; }
+            .upload-zone p { margin: 0; color: var(--text); }
+            .upload-zone .file-name { color: var(--success); font-weight: 600; margin-top: 10px; }
+            .upload-btn { margin-top: 15px; display: none; }
+            .upload-btn.show { display: inline-block; }
 
             /* List Section */
             h3 { margin-top: 30px; color: var(--white); font-weight: 500; }
@@ -530,6 +596,7 @@ function dashboardTemplate() {
             .status-text { font-size: 0.8rem; margin-top: 8px; display: block; }
 
             .empty { text-align: center; padding: 40px 20px; opacity: 0.5; }
+            .hidden { display: none !important; }
             
             @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         </style>
@@ -537,13 +604,31 @@ function dashboardTemplate() {
     <body>
         <div class="container">
             <header>
-                <h1>🎮 Mana Bridge <span class="badge">v3.0</span></h1>
+                <h1>🎮 Mana Bridge <span class="badge">v4.0</span></h1>
                 <a href="/admin/logout" class="logout">🚪 Sair</a>
             </header>
 
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('magnet')">🔗 Magnet Link</button>
+                <button class="tab" onclick="switchTab('torrent')">📁 Arquivo .torrent</button>
+            </div>
+
             <div class="add-box">
-                <input type="text" id="magnet" placeholder="Cole o Magnet Link aqui..." autocomplete="off">
-                <button id="uploadBtn" onclick="uploadGame()">🚀 Iniciar Download</button>
+                <!-- Magnet Input -->
+                <div id="magnet-section" class="input-row">
+                    <input type="text" id="magnet" placeholder="Cole o Magnet Link aqui..." autocomplete="off">
+                    <button id="uploadBtn" onclick="uploadMagnet()">🚀 Iniciar</button>
+                </div>
+                
+                <!-- Torrent File Upload -->
+                <div id="torrent-section" class="upload-zone" onclick="document.getElementById('torrentFile').click()">
+                    <input type="file" id="torrentFile" accept=".torrent" onchange="handleFileSelect(this)">
+                    <div class="icon">📁</div>
+                    <p>Clique ou arraste um arquivo <strong>.torrent</strong> aqui</p>
+                    <div id="selectedFile" class="file-name"></div>
+                    <button id="uploadTorrentBtn" class="upload-btn" onclick="event.stopPropagation(); uploadTorrentFile()">🚀 Enviar Torrent</button>
+                </div>
             </div>
 
             <h3>Downloads Ativos</h3>
@@ -553,7 +638,48 @@ function dashboardTemplate() {
         </div>
 
         <script>
-            async function uploadGame() {
+            let selectedFile = null;
+            
+            // Tab switching
+            function switchTab(tab) {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                event.target.classList.add('active');
+                
+                if (tab === 'magnet') {
+                    document.getElementById('magnet-section').classList.remove('hidden');
+                    document.getElementById('torrent-section').classList.remove('active');
+                } else {
+                    document.getElementById('magnet-section').classList.add('hidden');
+                    document.getElementById('torrent-section').classList.add('active');
+                }
+            }
+            
+            // File handling
+            function handleFileSelect(input) {
+                if (input.files && input.files[0]) {
+                    selectedFile = input.files[0];
+                    document.getElementById('selectedFile').textContent = '✅ ' + selectedFile.name;
+                    document.getElementById('uploadTorrentBtn').classList.add('show');
+                }
+            }
+            
+            // Drag and drop
+            const dropZone = document.getElementById('torrent-section');
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                if (e.dataTransfer.files[0]?.name.endsWith('.torrent')) {
+                    document.getElementById('torrentFile').files = e.dataTransfer.files;
+                    handleFileSelect(document.getElementById('torrentFile'));
+                } else {
+                    alert('Apenas arquivos .torrent são permitidos!');
+                }
+            });
+            
+            // Upload Magnet
+            async function uploadMagnet() {
                 const magnet = document.getElementById('magnet').value.trim();
                 if (!magnet) return alert('Por favor, cole um link!');
                 
@@ -569,35 +695,67 @@ function dashboardTemplate() {
                         body: JSON.stringify({ magnet })
                     });
                     
-                    if (res.status === 401) {
-                        window.location.href = '/admin/login';
-                        return;
-                    }
+                    if (res.status === 401) return window.location.href = '/admin/login';
                     
                     if(res.ok) {
                         document.getElementById('magnet').value = '';
                         loadStatus();
                     } else {
                         const data = await res.json();
-                        alert(data.error || 'Erro ao iniciar. Verifique o link.');
+                        alert(data.error || 'Erro ao iniciar.');
                     }
                 } catch(e) { 
                     console.error(e);
                     alert('Erro de conexão');
                 }
                 
-                btn.innerText = '🚀 Iniciar Download';
+                btn.innerText = '🚀 Iniciar';
+                btn.disabled = false;
+            }
+            
+            // Upload Torrent File
+            async function uploadTorrentFile() {
+                if (!selectedFile) return alert('Selecione um arquivo .torrent primeiro!');
+                
+                const btn = document.getElementById('uploadTorrentBtn');
+                btn.innerText = 'Enviando...';
+                btn.disabled = true;
+                
+                const formData = new FormData();
+                formData.append('torrentFile', selectedFile);
+
+                try {
+                    const res = await fetch('/bridge/upload-torrent', {
+                        method: 'POST',
+                        credentials: 'include',
+                        body: formData
+                    });
+                    
+                    if (res.status === 401) return window.location.href = '/admin/login';
+                    
+                    if(res.ok) {
+                        document.getElementById('torrentFile').value = '';
+                        document.getElementById('selectedFile').textContent = '';
+                        document.getElementById('uploadTorrentBtn').classList.remove('show');
+                        selectedFile = null;
+                        loadStatus();
+                    } else {
+                        const data = await res.json();
+                        alert(data.error || 'Erro ao processar torrent.');
+                    }
+                } catch(e) { 
+                    console.error(e);
+                    alert('Erro de conexão');
+                }
+                
+                btn.innerText = '🚀 Enviar Torrent';
                 btn.disabled = false;
             }
 
             async function loadStatus() {
                 try {
                     const res = await fetch('/bridge/status', { credentials: 'include' });
-                    
-                    if (res.status === 401) {
-                        window.location.href = '/admin/login';
-                        return;
-                    }
+                    if (res.status === 401) return window.location.href = '/admin/login';
                     
                     const list = await res.json();
                     const container = document.getElementById('downloads-list');
@@ -628,13 +786,11 @@ function dashboardTemplate() {
                 } catch(e) { console.error(e); }
             }
 
-            // Atualiza a cada 2 segundos
             setInterval(loadStatus, 2000);
             loadStatus();
             
-            // Enter para enviar
             document.getElementById('magnet').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') uploadGame();
+                if (e.key === 'Enter') uploadMagnet();
             });
         </script>
     </body>
