@@ -42,20 +42,14 @@ function generateToken(email, pass) {
 
 // --- HELPER: Configurações do Cookie ---
 function getCookieOptions() {
-  const options = {
+  // Configuração simplificada que funciona tanto em dev quanto prod
+  return {
     maxAge: 86400000, // 24 horas
     httpOnly: true,
     path: "/",
-    sameSite: "lax",
+    sameSite: "lax", // Lax funciona bem para same-site navigation
+    secure: IS_PRODUCTION, // Só true em HTTPS
   };
-
-  // Em produção (HTTPS), precisa de secure: true
-  if (IS_PRODUCTION) {
-    options.secure = true;
-    options.sameSite = "none"; // Necessário para cross-site em alguns casos
-  }
-
-  return options;
 }
 
 // --- MIDDLEWARE DE AUTENTICAÇÃO ---
@@ -71,7 +65,16 @@ const requireAuth = (req, res, next) => {
   // 2. Tenta ler o cookie 'auth_token'
   const cookies = req.headers.cookie || "";
   const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-  const token = tokenMatch ? tokenMatch[1] : null;
+  let token = tokenMatch ? tokenMatch[1] : null;
+
+  // IMPORTANTE: Decodifica o token caso tenha sido URL-encoded
+  if (token) {
+    try {
+      token = decodeURIComponent(token);
+    } catch (e) {
+      // Se falhar, mantém o original
+    }
+  }
 
   console.log(
     `[ManaBridge] Auth check - Token presente: ${token ? "Sim" : "Não"}`
@@ -79,6 +82,15 @@ const requireAuth = (req, res, next) => {
 
   // 3. Valida o token
   const validToken = generateToken(ADMIN_EMAIL, ADMIN_PASS);
+
+  // DEBUG: Compara os tokens
+  console.log(
+    `[ManaBridge] Token recebido: ${
+      token ? token.substring(0, 20) + "..." : "null"
+    }`
+  );
+  console.log(`[ManaBridge] Token esperado: ${validToken.substring(0, 20)}...`);
+  console.log(`[ManaBridge] Match: ${token === validToken}`);
 
   if (token === validToken) {
     console.log("[ManaBridge] ✅ Autenticação válida");
