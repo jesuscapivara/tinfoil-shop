@@ -24,25 +24,59 @@ const app = express();
 app.enable("trust proxy");
 
 app.use((req, res, next) => {
-  req.setTimeout(20000);
-  if (req.url.includes("/download")) log.info(`📥 Req: ${req.url}`);
+  req.setTimeout(60000);
   next();
 });
 
-const toBase64 = (str) => Buffer.from(str).toString("base64");
-const fromBase64 = (str) => Buffer.from(str, "base64").toString("utf-8");
-
-// Cache
-let fileCache = null;
+// CACHE PODEROSO
+// Agora o cache guarda não só o nome, mas o LINK FINAL do Dropbox
+let cachedGames = [];
 let lastCacheTime = 0;
-const CACHE_DURATION = 15 * 60 * 1000;
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos
 
-async function getAllFilesFromDropbox() {
+// Função auxiliar para gerar link CDN
+async function getDirectLink(path) {
+  try {
+    let sharedLink = "";
+    // 1. Tenta listar links existentes
+    const listResponse = await dbx.sharingListSharedLinks({ path: path });
+
+    if (listResponse.result.links.length > 0) {
+      sharedLink = listResponse.result.links[0].url;
+    } else {
+      // 2. Se não existir, cria
+      const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
+        path: path,
+      });
+      sharedLink = createResponse.result.url;
+    }
+
+    // 3. Converte para CDN Direct (mantendo rlkey)
+    const cdnUrl = new URL(sharedLink);
+    cdnUrl.hostname = "dl.dropboxusercontent.com";
+    cdnUrl.searchParams.delete("dl");
+    cdnUrl.searchParams.delete("preview");
+
+    return cdnUrl.toString();
+  } catch (e) {
+    log.error(`Falha ao gerar link para ${path}:`, e);
+    return null;
+  }
+}
+
+async function refreshGameList() {
   const now = Date.now();
-  if (fileCache && now - lastCacheTime < CACHE_DURATION) return fileCache;
+  // Retorna cache se estiver quente
+  if (cachedGames.length > 0 && now - lastCacheTime < CACHE_DURATION) {
+    return cachedGames;
+  }
 
-  log.info("🔄 Refreshing Cache...");
+  log.info(
+    "🔄 Atualizando Lista e Gerando Links (Isso pode demorar um pouco)..."
+  );
   let allFiles = [];
+
+  // 1. Escaneia arquivos
   try {
     let response = await dbx.filesListFolder({
       path: ROOT_GAMES_FOLDER,
@@ -63,45 +97,56 @@ async function getAllFilesFromDropbox() {
         entry[".tag"] === "file" && entry.name.match(/\.(nsp|nsz|xci)$/i)
     );
 
-    fileCache = validFiles;
+    log.info(
+      `📁 Encontrados ${validFiles.length} jogos. Gerando links diretos...`
+    );
+
+    // 2. Gera link direto para CADA jogo
+    // Usamos Promise.all para fazer em paralelo (mais rápido)
+    const processedGames = await Promise.all(
+      validFiles.map(async (file) => {
+        const directLink = await getDirectLink(file.path_lower);
+
+        if (!directLink) return null; // Pula se der erro
+
+        const displayName = file.name
+          .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
+          .trim();
+
+        return {
+          // AQUI ESTÁ A MÁGICA: O JSON JÁ VAI COM O LINK DO DROPBOX
+          // O Tinfoil vai baixar direto daqui. Sem redirects da Discloud.
+          url: directLink,
+          size: file.size,
+          name: displayName,
+        };
+      })
+    );
+
+    // Remove nulos
+    cachedGames = processedGames.filter((g) => g !== null);
     lastCacheTime = now;
-    return validFiles;
+
+    log.info(`✅ Cache atualizado com ${cachedGames.length} jogos prontos.`);
+    return cachedGames;
   } catch (e) {
-    log.error("Scan Error:", e);
+    log.error("Erro fatal no Scan:", e);
     return [];
   }
 }
 
-// ============== ROTA API ==============
+// ============== ROTA API (AGORA É A ÚNICA QUE IMPORTA) ==============
 app.get("/api", async (req, res) => {
   try {
-    const files = await getAllFilesFromDropbox();
-    const host = req.get("host") || process.env.DOMINIO || `localhost:${PORT}`;
-    const protocol = "https"; // Força HTTPS
-    const baseUrl = `${protocol}://${host}`;
+    // Aumenta timeout desta rota específica pois ela pode demorar gerando links
+    req.setTimeout(120000);
+
+    const games = await refreshGameList();
 
     const tinfoilJson = {
-      files: [],
-      success: `Mana Shop v17 (Link Resolver)`,
+      files: games,
+      success: "Mana Shop v18 (Direct Architecture)",
     };
-
-    files.forEach((file) => {
-      const displayName = file.name
-        .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
-        .trim();
-      // Voltamos para query param (?data) que é mais seguro para redirects
-      const safeUrlName = displayName.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const path64 = encodeURIComponent(toBase64(file.path_lower));
-
-      // Formato v17: /download/NomeDoJogo.nsp?data=...
-      const downloadUrl = `${baseUrl}/download/${safeUrlName}?data=${path64}`;
-
-      tinfoilJson.files.push({
-        url: downloadUrl,
-        size: file.size,
-        name: displayName,
-      });
-    });
 
     res.json(tinfoilJson);
   } catch (error) {
@@ -110,74 +155,6 @@ app.get("/api", async (req, res) => {
   }
 });
 
-// ============== ROTA DOWNLOAD (RESOLVER) ==============
-app.get("/download/:filename", async (req, res) => {
-  const encodedPath = req.query.data;
-  if (!encodedPath) return res.status(400).send("Missing data");
-
-  try {
-    const realPath = fromBase64(encodedPath);
-    let sharedLink = "";
-
-    // 1. Obtém Link (SCL com RLKEY)
-    const listResponse = await dbx.sharingListSharedLinks({ path: realPath });
-    if (listResponse.result.links.length > 0) {
-      sharedLink = listResponse.result.links[0].url;
-    } else {
-      const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
-        path: realPath,
-      });
-      sharedLink = createResponse.result.url;
-    }
-
-    // 2. Prepara URL do Dropbox (mantendo rlkey)
-    const cdnUrl = new URL(sharedLink);
-    cdnUrl.hostname = "dl.dropboxusercontent.com";
-    cdnUrl.searchParams.delete("dl");
-    cdnUrl.searchParams.delete("preview");
-    const initialLink = cdnUrl.toString();
-
-    log.info(`🔍 Resolvendo link final para: ${req.params.filename}`);
-
-    // 3. O PULO DO GATO: Resolver o Redirect no Servidor
-    // Fazemos HEAD request com redirect: 'manual' para pegar o header Location
-    const headResp = await fetch(initialLink, {
-      method: "HEAD",
-      redirect: "manual",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", // Finge ser browser
-      },
-    });
-
-    let finalLink = initialLink;
-
-    // Se o Dropbox respondeu com 301/302, pegamos o destino real (uc...)
-    if (headResp.status >= 300 && headResp.status < 400) {
-      const location = headResp.headers.get("location");
-      if (location) {
-        finalLink = location;
-        log.info('✅ Link final "uc..." encontrado.');
-      }
-    } else {
-      log.info(
-        `⚠️ Dropbox não redirecionou (Status ${headResp.status}). Usando link CDN direto.`
-      );
-    }
-
-    // 4. Redireciona o Tinfoil para o Link Bruto
-    // Headers essenciais para o Tinfoil aceitar
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${req.params.filename}"`
-    );
-    res.redirect(302, finalLink);
-  } catch (error) {
-    log.error(`❌ Erro Resolver:`, error);
-    res.status(500).send("Erro ao resolver link.");
-  }
-});
-
 app.listen(PORT, () => {
-  log.info(`🚀 Mana Shop v17 rodando na porta ${PORT}`);
+  log.info(`🚀 Mana Shop v18 (Direct Link) rodando na porta ${PORT}`);
 });
