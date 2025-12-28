@@ -241,241 +241,282 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
 
   // Handler de erro do client.add
   try {
-    client.add(torrentInput, { path: "/tmp" }, (torrent) => {
-      log(`✅ TORRENT CONECTADO`, "TORRENT");
-      log(`   Nome: ${torrent.name}`, "TORRENT");
-      log(`   InfoHash: ${torrent.infoHash}`, "TORRENT");
-      log(`   Total de arquivos: ${torrent.files.length}`, "TORRENT");
-      log(
-        `   Tamanho total: ${(torrent.length / 1024 / 1024 / 1024).toFixed(
-          2
-        )} GB`,
-        "TORRENT"
-      );
-      log(`   Peers conectados: ${torrent.numPeers}`, "TORRENT");
+    const torrentInstance = client.add(
+      torrentInput,
+      { path: "/tmp" },
+      (torrent) => {
+        // Armazena referência do torrent para cancelamento (tanto a instância quanto o objeto)
+        activeDownloads[id].torrent = torrent;
+        activeDownloads[id].torrentInstance = torrentInstance;
 
-      // Lista TODOS os arquivos
-      log(`📁 LISTA COMPLETA DE ARQUIVOS:`, "TORRENT");
-      torrent.files.forEach((f, i) => {
-        const sizeMB = (f.length / 1024 / 1024).toFixed(2);
-        const isGame = f.name.match(/\.(nsp|nsz|xci)$/i) ? "🎮" : "📄";
-        log(`   ${i + 1}. ${isGame} ${f.name} (${sizeMB} MB)`, "TORRENT");
-      });
+        log(`✅ TORRENT CONECTADO`, "TORRENT");
+        log(`   Nome: ${torrent.name}`, "TORRENT");
+        log(`   InfoHash: ${torrent.infoHash}`, "TORRENT");
+        log(`   Total de arquivos: ${torrent.files.length}`, "TORRENT");
+        log(
+          `   Tamanho total: ${(torrent.length / 1024 / 1024 / 1024).toFixed(
+            2
+          )} GB`,
+          "TORRENT"
+        );
+        log(`   Peers conectados: ${torrent.numPeers}`, "TORRENT");
 
-      // Filtra arquivos de jogo
-      const gameFiles = torrent.files.filter((f) =>
-        f.name.match(/\.(nsp|nsz|xci)$/i)
-      );
-      log(`🎮 Arquivos de jogo encontrados: ${gameFiles.length}`, "TORRENT");
+        // Lista TODOS os arquivos
+        log(`📁 LISTA COMPLETA DE ARQUIVOS:`, "TORRENT");
+        torrent.files.forEach((f, i) => {
+          const sizeMB = (f.length / 1024 / 1024).toFixed(2);
+          const isGame = f.name.match(/\.(nsp|nsz|xci)$/i) ? "🎮" : "📄";
+          log(`   ${i + 1}. ${isGame} ${f.name} (${sizeMB} MB)`, "TORRENT");
+        });
 
-      // Calcula tamanho total dos jogos
-      const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
-      const totalSizeStr =
-        totalGameSize > 1024 * 1024 * 1024
-          ? (totalGameSize / 1024 / 1024 / 1024).toFixed(2) + " GB"
-          : (totalGameSize / 1024 / 1024).toFixed(2) + " MB";
+        // Filtra arquivos de jogo
+        const gameFiles = torrent.files.filter((f) =>
+          f.name.match(/\.(nsp|nsz|xci)$/i)
+        );
+        log(`🎮 Arquivos de jogo encontrados: ${gameFiles.length}`, "TORRENT");
 
-      activeDownloads[id].name = torrent.name;
-      activeDownloads[id].phase = "downloading";
-      activeDownloads[id].total = totalSizeStr;
-      activeDownloads[id].uploadTotal = totalSizeStr;
-      activeDownloads[id].peers = torrent.numPeers;
-      activeDownloads[id].totalFiles = gameFiles.length;
+        // Calcula tamanho total dos jogos
+        const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
+        const totalSizeStr =
+          totalGameSize > 1024 * 1024 * 1024
+            ? (totalGameSize / 1024 / 1024 / 1024).toFixed(2) + " GB"
+            : (totalGameSize / 1024 / 1024).toFixed(2) + " MB";
 
-      if (gameFiles.length === 0) {
-        log(`❌ ERRO: Nenhum arquivo .nsp/.nsz/.xci encontrado!`, "ERROR");
-        activeDownloads[id].phase = "error";
-        activeDownloads[id].error = "Nenhum jogo Switch encontrado no torrent";
-        torrent.destroy();
-        // Processa próximo da fila após erro
-        setTimeout(() => onDownloadComplete(id), 5000);
-        return;
-      }
-
-      const mainFile = gameFiles.reduce((a, b) =>
-        a.length > b.length ? a : b
-      );
-      const gameFolderName = extractGameName(mainFile.name);
-
-      log(
-        `📂 Pasta destino: ${ROOT_GAMES_FOLDER}/${gameFolderName}/`,
-        "TORRENT"
-      );
-      activeDownloads[id].name = gameFolderName;
-
-      // Progresso do download
-      let lastLoggedProgress = 0;
-      torrent.on("download", () => {
-        const progress = Math.floor(torrent.progress * 100);
-        const downloaded = torrent.downloaded;
-        const downloadSpeed = torrent.downloadSpeed;
-        const uploadSpeed = torrent.uploadSpeed;
-        const uploaded = torrent.uploaded;
-        const timeRemaining = torrent.timeRemaining;
-
-        // Formata valores
-        const formatBytes = (bytes) => {
-          if (bytes > 1024 * 1024 * 1024)
-            return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
-          return (bytes / 1024 / 1024).toFixed(2) + " MB";
-        };
-
-        const formatTime = (ms) => {
-          if (!ms || ms === Infinity) return "--:--";
-          const seconds = Math.floor(ms / 1000);
-          const mins = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          if (mins > 60) {
-            const hours = Math.floor(mins / 60);
-            return `${hours}h ${mins % 60}m`;
-          }
-          return `${mins}:${secs.toString().padStart(2, "0")}`;
-        };
-
-        activeDownloads[id].downloadPercent = progress.toFixed(1);
-        activeDownloads[id].downloadSpeed =
-          (downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
-        activeDownloads[id].downloaded = formatBytes(downloaded);
-        activeDownloads[id].peers = torrent.numPeers;
-        activeDownloads[id].downloadEta = formatTime(timeRemaining);
+        activeDownloads[id].name = torrent.name;
         activeDownloads[id].phase = "downloading";
-
-        // Log a cada 10%
-        if (progress >= lastLoggedProgress + 10) {
-          lastLoggedProgress = progress;
-          log(
-            `📥 Download: ${progress}% | ${activeDownloads[id].downloadSpeed} | Peers: ${torrent.numPeers} | ETA: ${activeDownloads[id].downloadEta}`,
-            "TORRENT"
-          );
-        }
-      });
-
-      // Atualiza peers
-      torrent.on("wire", () => {
+        activeDownloads[id].total = totalSizeStr;
+        activeDownloads[id].uploadTotal = totalSizeStr;
         activeDownloads[id].peers = torrent.numPeers;
-      });
+        activeDownloads[id].totalFiles = gameFiles.length;
 
-      // DOWNLOAD COMPLETO
-      torrent.on("done", async () => {
-        log(`═══════════════════════════════════════════════`, "TORRENT");
-        log(`✅ DOWNLOAD 100% COMPLETO!`, "TORRENT");
-        log(`   Torrent: ${torrent.name}`, "TORRENT");
-        log(`   Arquivos de jogo: ${gameFiles.length}`, "TORRENT");
-        log(`═══════════════════════════════════════════════`, "TORRENT");
+        if (gameFiles.length === 0) {
+          log(`❌ ERRO: Nenhum arquivo .nsp/.nsz/.xci encontrado!`, "ERROR");
+          activeDownloads[id].phase = "error";
+          activeDownloads[id].error =
+            "Nenhum jogo Switch encontrado no torrent";
+          torrent.destroy();
+          // Processa próximo da fila após erro
+          setTimeout(() => onDownloadComplete(id), 5000);
+          return;
+        }
 
-        // Marca download como concluído
-        activeDownloads[id].downloadPercent = 100;
-        activeDownloads[id].downloadDone = true;
-        activeDownloads[id].downloadEta = "Concluído";
-        activeDownloads[id].phase = "uploading";
-        activeDownloads[id].uploadSpeed = "-- MB/s";
+        const mainFile = gameFiles.reduce((a, b) =>
+          a.length > b.length ? a : b
+        );
+        const gameFolderName = extractGameName(mainFile.name);
 
-        let totalUploaded = 0;
-        const totalUploadSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
+        log(
+          `📂 Pasta destino: ${ROOT_GAMES_FOLDER}/${gameFolderName}/`,
+          "TORRENT"
+        );
+        activeDownloads[id].name = gameFolderName;
 
-        try {
-          for (let i = 0; i < gameFiles.length; i++) {
-            const file = gameFiles[i];
-            const destPath = `${ROOT_GAMES_FOLDER}/${gameFolderName}/${file.name}`;
-            const fileSizeStr =
-              file.length > 1024 * 1024 * 1024
-                ? (file.length / 1024 / 1024 / 1024).toFixed(2) + " GB"
-                : (file.length / 1024 / 1024).toFixed(2) + " MB";
+        // Progresso do download
+        let lastLoggedProgress = 0;
+        torrent.on("download", () => {
+          const progress = Math.floor(torrent.progress * 100);
+          const downloaded = torrent.downloaded;
+          const downloadSpeed = torrent.downloadSpeed;
+          const uploadSpeed = torrent.uploadSpeed;
+          const uploaded = torrent.uploaded;
+          const timeRemaining = torrent.timeRemaining;
 
-            log(
-              `📤 UPLOAD ${i + 1}/${gameFiles.length}: ${file.name}`,
-              "UPLOAD"
-            );
-            log(`   Destino: ${destPath}`, "UPLOAD");
-            log(`   Tamanho: ${fileSizeStr}`, "UPLOAD");
-
-            activeDownloads[id].currentFile = file.name;
-            activeDownloads[id].fileIndex = i + 1;
-
-            await uploadFileToDropbox(file, destPath, id, gameFiles.length, i);
-
-            totalUploaded += file.length;
-            const uploadProgress = Math.floor(
-              (totalUploaded / totalUploadSize) * 100
-            );
-            activeDownloads[id].uploadPercent = uploadProgress;
-            activeDownloads[id].uploadedBytes =
-              totalUploaded > 1024 * 1024 * 1024
-                ? (totalUploaded / 1024 / 1024 / 1024).toFixed(2) + " GB"
-                : (totalUploaded / 1024 / 1024).toFixed(2) + " MB";
-
-            log(`✅ Upload ${i + 1}/${gameFiles.length} concluído!`, "UPLOAD");
-          }
-
-          log(`═══════════════════════════════════════════════`, "SUCCESS");
-          log(`🎉 TODOS OS UPLOADS CONCLUÍDOS!`, "SUCCESS");
-          log(`   Pasta: ${gameFolderName}`, "SUCCESS");
-          log(`   Arquivos: ${gameFiles.length}`, "SUCCESS");
-          log(`═══════════════════════════════════════════════`, "SUCCESS");
-
-          // Marca como concluído
-          activeDownloads[id].uploadPercent = 100;
-          activeDownloads[id].uploadDone = true;
-          activeDownloads[id].phase = "done";
-
-          // Adiciona ao histórico de finalizados
-          const completedEntry = {
-            id,
-            name: gameFolderName,
-            files: gameFiles.length,
-            size: activeDownloads[id].total,
-            folder: `${ROOT_GAMES_FOLDER}/${gameFolderName}`,
-            completedAt: new Date().toISOString(),
-            duration: Math.floor(
-              (Date.now() - new Date(activeDownloads[id].startedAt).getTime()) /
-                1000
-            ),
-            source: activeDownloads[id].source || "magnet",
+          // Formata valores
+          const formatBytes = (bytes) => {
+            if (bytes > 1024 * 1024 * 1024)
+              return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+            return (bytes / 1024 / 1024).toFixed(2) + " MB";
           };
 
-          // Salva no MongoDB
-          saveDownloadHistory(completedEntry).catch(() => {});
+          const formatTime = (ms) => {
+            if (!ms || ms === Infinity) return "--:--";
+            const seconds = Math.floor(ms / 1000);
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            if (mins > 60) {
+              const hours = Math.floor(mins / 60);
+              return `${hours}h ${mins % 60}m`;
+            }
+            return `${mins}:${secs.toString().padStart(2, "0")}`;
+          };
 
-          // Adiciona na memória
-          completedDownloads.unshift(completedEntry);
-          if (completedDownloads.length > MAX_COMPLETED) {
-            completedDownloads.pop();
+          activeDownloads[id].downloadPercent = progress.toFixed(1);
+          activeDownloads[id].downloadSpeed =
+            (downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
+          activeDownloads[id].downloaded = formatBytes(downloaded);
+          activeDownloads[id].peers = torrent.numPeers;
+          activeDownloads[id].downloadEta = formatTime(timeRemaining);
+          activeDownloads[id].phase = "downloading";
+
+          // Log a cada 10%
+          if (progress >= lastLoggedProgress + 10) {
+            lastLoggedProgress = progress;
+            log(
+              `📥 Download: ${progress}% | ${activeDownloads[id].downloadSpeed} | Peers: ${torrent.numPeers} | ETA: ${activeDownloads[id].downloadEta}`,
+              "TORRENT"
+            );
           }
+        });
 
-          // Remove do ativo após 10 segundos e processa próximo da fila
-          setTimeout(() => {
-            delete activeDownloads[id];
-            onDownloadComplete(id);
-          }, 10000);
-        } catch (err) {
-          log(`═══════════════════════════════════════════════`, "ERROR");
-          log(`❌ ERRO NO UPLOAD!`, "ERROR");
-          log(`   Mensagem: ${err.message}`, "ERROR");
-          log(`   Stack: ${err.stack}`, "ERROR");
-          log(`═══════════════════════════════════════════════`, "ERROR");
+        // Atualiza peers
+        torrent.on("wire", () => {
+          activeDownloads[id].peers = torrent.numPeers;
+        });
 
+        // DOWNLOAD COMPLETO
+        torrent.on("done", async () => {
+          log(`═══════════════════════════════════════════════`, "TORRENT");
+          log(`✅ DOWNLOAD 100% COMPLETO!`, "TORRENT");
+          log(`   Torrent: ${torrent.name}`, "TORRENT");
+          log(`   Arquivos de jogo: ${gameFiles.length}`, "TORRENT");
+          log(`═══════════════════════════════════════════════`, "TORRENT");
+
+          // Marca download como concluído
+          activeDownloads[id].downloadPercent = 100;
+          activeDownloads[id].downloadDone = true;
+          activeDownloads[id].downloadEta = "Concluído";
+          activeDownloads[id].phase = "uploading";
+          activeDownloads[id].uploadSpeed = "-- MB/s";
+
+          let totalUploaded = 0;
+          const totalUploadSize = gameFiles.reduce(
+            (acc, f) => acc + f.length,
+            0
+          );
+
+          try {
+            for (let i = 0; i < gameFiles.length; i++) {
+              // ⚠️ VERIFICAÇÃO: Para o loop se foi cancelado
+              if (!activeDownloads[id] || activeDownloads[id].isCancelled) {
+                log(
+                  `⚠️ Upload cancelado pelo usuário (arquivo ${i + 1}/${
+                    gameFiles.length
+                  })`,
+                  "CANCEL"
+                );
+                return;
+              }
+
+              const file = gameFiles[i];
+              const destPath = `${ROOT_GAMES_FOLDER}/${gameFolderName}/${file.name}`;
+              const fileSizeStr =
+                file.length > 1024 * 1024 * 1024
+                  ? (file.length / 1024 / 1024 / 1024).toFixed(2) + " GB"
+                  : (file.length / 1024 / 1024).toFixed(2) + " MB";
+
+              log(
+                `📤 UPLOAD ${i + 1}/${gameFiles.length}: ${file.name}`,
+                "UPLOAD"
+              );
+              log(`   Destino: ${destPath}`, "UPLOAD");
+              log(`   Tamanho: ${fileSizeStr}`, "UPLOAD");
+
+              activeDownloads[id].currentFile = file.name;
+              activeDownloads[id].fileIndex = i + 1;
+
+              await uploadFileToDropbox(
+                file,
+                destPath,
+                id,
+                gameFiles.length,
+                i
+              );
+
+              totalUploaded += file.length;
+              const uploadProgress = Math.floor(
+                (totalUploaded / totalUploadSize) * 100
+              );
+              activeDownloads[id].uploadPercent = uploadProgress;
+              activeDownloads[id].uploadedBytes =
+                totalUploaded > 1024 * 1024 * 1024
+                  ? (totalUploaded / 1024 / 1024 / 1024).toFixed(2) + " GB"
+                  : (totalUploaded / 1024 / 1024).toFixed(2) + " MB";
+
+              log(
+                `✅ Upload ${i + 1}/${gameFiles.length} concluído!`,
+                "UPLOAD"
+              );
+            }
+
+            log(`═══════════════════════════════════════════════`, "SUCCESS");
+            log(`🎉 TODOS OS UPLOADS CONCLUÍDOS!`, "SUCCESS");
+            log(`   Pasta: ${gameFolderName}`, "SUCCESS");
+            log(`   Arquivos: ${gameFiles.length}`, "SUCCESS");
+            log(`═══════════════════════════════════════════════`, "SUCCESS");
+
+            // Marca como concluído
+            activeDownloads[id].uploadPercent = 100;
+            activeDownloads[id].uploadDone = true;
+            activeDownloads[id].phase = "done";
+
+            // Adiciona ao histórico de finalizados
+            const completedEntry = {
+              id,
+              name: gameFolderName,
+              files: gameFiles.length,
+              size: activeDownloads[id].total,
+              folder: `${ROOT_GAMES_FOLDER}/${gameFolderName}`,
+              completedAt: new Date().toISOString(),
+              duration: Math.floor(
+                (Date.now() -
+                  new Date(activeDownloads[id].startedAt).getTime()) /
+                  1000
+              ),
+              source: activeDownloads[id].source || "magnet",
+            };
+
+            // Salva no MongoDB
+            saveDownloadHistory(completedEntry).catch(() => {});
+
+            // Adiciona na memória
+            completedDownloads.unshift(completedEntry);
+            if (completedDownloads.length > MAX_COMPLETED) {
+              completedDownloads.pop();
+            }
+
+            // Remove do ativo após 10 segundos e processa próximo da fila
+            setTimeout(() => {
+              delete activeDownloads[id];
+              onDownloadComplete(id);
+            }, 10000);
+          } catch (err) {
+            // ⚠️ Ignora erro se foi cancelado manualmente
+            if (activeDownloads[id]?.isCancelled) {
+              log(`⚠️ Upload cancelado pelo usuário (erro ignorado)`, "CANCEL");
+              return;
+            }
+
+            log(`═══════════════════════════════════════════════`, "ERROR");
+            log(`❌ ERRO NO UPLOAD!`, "ERROR");
+            log(`   Mensagem: ${err.message}`, "ERROR");
+            log(`   Stack: ${err.stack}`, "ERROR");
+            log(`═══════════════════════════════════════════════`, "ERROR");
+
+            if (activeDownloads[id]) {
+              activeDownloads[id].error = err.message;
+              activeDownloads[id].phase = "error";
+            }
+            // Processa próximo da fila após erro
+            setTimeout(() => onDownloadComplete(id), 5000);
+          } finally {
+            torrent.destroy();
+            log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
+          }
+        });
+
+        torrent.on("error", (err) => {
+          log(`❌ ERRO NO TORRENT: ${err.message}`, "ERROR");
           activeDownloads[id].error = err.message;
           activeDownloads[id].phase = "error";
           // Processa próximo da fila após erro
           setTimeout(() => onDownloadComplete(id), 5000);
-        } finally {
-          torrent.destroy();
-          log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
-        }
-      });
+        });
 
-      torrent.on("error", (err) => {
-        log(`❌ ERRO NO TORRENT: ${err.message}`, "ERROR");
-        activeDownloads[id].error = err.message;
-        activeDownloads[id].phase = "error";
-        // Processa próximo da fila após erro
-        setTimeout(() => onDownloadComplete(id), 5000);
-      });
-
-      torrent.on("warning", (warn) => {
-        log(`⚠️ Warning: ${warn}`, "WARN");
-      });
-    });
+        torrent.on("warning", (warn) => {
+          log(`⚠️ Warning: ${warn}`, "WARN");
+        });
+      }
+    );
   } catch (err) {
     log(`❌ ERRO ao adicionar torrent: ${err.message}`, "ERROR");
     activeDownloads[id].error = err.message;
@@ -554,6 +595,14 @@ async function uploadSmallFile(
     stream.on("error", (err) => reject(err));
 
     stream.on("end", async () => {
+      // ⚠️ VERIFICAÇÃO: Não finaliza se foi cancelado
+      if (
+        !activeDownloads[downloadId] ||
+        activeDownloads[downloadId].isCancelled
+      ) {
+        return reject(new Error("Cancelado pelo usuário"));
+      }
+
       try {
         const buffer = Buffer.concat(chunks);
         log(
@@ -612,13 +661,31 @@ async function uploadWithSmartStream(
     );
 
     stream.on("data", async (chunk) => {
+      // ⚠️ VERIFICAÇÃO CRÍTICA: Para imediatamente se foi cancelado
+      if (
+        !activeDownloads[downloadId] ||
+        activeDownloads[downloadId].isCancelled
+      ) {
+        stream.destroy();
+        return reject(new Error("Cancelado pelo usuário"));
+      }
+
       // Acumula no buffer
       buffer = Buffer.concat([buffer, chunk]);
 
-      // Se o buffer encheu (5MB), hora de enviar!
+      // Se o buffer encheu (50MB), hora de enviar!
       if (buffer.length >= SMART_CHUNK_SIZE) {
         // PAUSA o stream para não estourar a memória
         stream.pause();
+
+        // ⚠️ VERIFICAÇÃO ANTES DE ENVIAR CHUNK
+        if (
+          !activeDownloads[downloadId] ||
+          activeDownloads[downloadId].isCancelled
+        ) {
+          stream.destroy();
+          return reject(new Error("Cancelado pelo usuário"));
+        }
 
         try {
           const chunkToSend = buffer.slice(0, SMART_CHUNK_SIZE);
@@ -692,6 +759,14 @@ async function uploadWithSmartStream(
     });
 
     stream.on("end", async () => {
+      // ⚠️ VERIFICAÇÃO CRÍTICA: Não finaliza se foi cancelado
+      if (
+        !activeDownloads[downloadId] ||
+        activeDownloads[downloadId].isCancelled
+      ) {
+        return reject(new Error("Cancelado pelo usuário"));
+      }
+
       // Envia o que sobrou no buffer (último chunk)
       try {
         if (buffer.length > 0 || offset === 0) {
@@ -937,5 +1012,60 @@ router.post(
     }
   }
 );
+
+// --- ROTA DE CANCELAMENTO ---
+router.post("/bridge/cancel/:id", requireAuth, (req, res) => {
+  const { id } = req.params;
+  const download = activeDownloads[id];
+
+  if (!download) {
+    return res.status(404).json({ error: "Download não encontrado" });
+  }
+
+  // Verifica se está na fila (antes de estar ativo)
+  const queueIndex = downloadQueue.findIndex((q) => q.id === id);
+  if (queueIndex !== -1) {
+    // Remove da fila
+    downloadQueue.splice(queueIndex, 1);
+    log(`❌ Download ${id} removido da fila`, "CANCEL");
+    return res.json({
+      success: true,
+      message: "Download removido da fila",
+      removedFromQueue: true,
+    });
+  }
+
+  // Cancela download ativo
+  try {
+    // ⚠️ FLAG CRÍTICA: Para o upload instantaneamente
+    download.isCancelled = true;
+
+    // Destrói o torrent se existir (tenta ambas as referências)
+    if (download.torrent) {
+      download.torrent.destroy();
+      log(`🗑️ Torrent ${id} destruído pelo usuário`, "CANCEL");
+    } else if (download.torrentInstance) {
+      download.torrentInstance.destroy();
+      log(`🗑️ Torrent instance ${id} destruído pelo usuário`, "CANCEL");
+    }
+
+    // Marca como cancelado
+    download.phase = "error";
+    download.error = "Cancelado pelo usuário";
+    download.uploadStatus = "Cancelado";
+
+    // Remove após 5 segundos e processa próximo da fila
+    setTimeout(() => {
+      delete activeDownloads[id];
+      onDownloadComplete(id);
+    }, 5000);
+
+    log(`❌ Download ${id} cancelado pelo usuário`, "CANCEL");
+    res.json({ success: true, message: "Download cancelado" });
+  } catch (err) {
+    log(`❌ Erro ao cancelar download: ${err.message}`, "ERROR");
+    res.status(500).json({ error: "Erro ao cancelar download" });
+  }
+});
 
 export default router;

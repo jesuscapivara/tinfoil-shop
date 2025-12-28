@@ -429,6 +429,32 @@ export function dashboardTemplate() {
             gap: 12px;
             margin-bottom: 14px;
         }
+        .card-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+        .cancel-btn {
+            background: transparent;
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .cancel-btn:hover {
+            background: var(--error);
+            color: white;
+        }
+        .cancel-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
         .game-name { 
             color: var(--white); 
             font-weight: 600;
@@ -723,6 +749,33 @@ export function dashboardTemplate() {
             setTimeout(() => notif.remove(), 4000);
         }
         
+        async function cancelDownload(id) {
+            if (!confirm('Tem certeza que deseja cancelar este download?')) {
+                return;
+            }
+            
+            try {
+                const res = await fetch(\`/bridge/cancel/\${id}\`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                if (res.status === 401) return window.location.href = '/admin/login';
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showNotification(data.message || 'Download cancelado', 'info');
+                    loadStatus();
+                } else {
+                    showNotification(data.error || 'Erro ao cancelar', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showNotification('Erro de conexão ao cancelar', 'error');
+            }
+        }
+        
         function switchInputTab(tab) {
             document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
@@ -1004,8 +1057,15 @@ export function dashboardTemplate() {
             return \`
                 <div class="card-main">
                     <div class="card-header">
-                        <span class="game-name">\${item.name}</span>
-                        <span class="phase-badge phase-\${item.phase}">\${getPhaseLabel(item.phase)}</span>
+                        <div class="card-header-left">
+                            <span class="game-name">\${item.name}</span>
+                            <span class="phase-badge phase-\${item.phase}">\${getPhaseLabel(item.phase)}</span>
+                        </div>
+                        \${!isDone && !isError ? \`
+                            <button class="cancel-btn" onclick="cancelDownload('\${item.id}')" title="Cancelar download">
+                                ✕ Cancelar
+                            </button>
+                        \` : ''}
                     </div>
                     
                     <div class="progress-group">
