@@ -55,7 +55,11 @@ client.on("error", (err) =>
 
 let activeDownloads = {};
 let completedDownloads = []; // Histórico de downloads finalizados (carregado do MongoDB)
+let downloadQueue = []; // 🚦 FILA DE DOWNLOADS
+let isProcessingQueue = false; // Flag para evitar processamento duplo
+
 const MAX_COMPLETED = 50; // Mantém últimos 50 finalizados
+const MAX_CONCURRENT_DOWNLOADS = 1; // ⚠️ LIMITE: Apenas 1 download por vez (protege RAM)
 
 // Carrega histórico do MongoDB na inicialização
 (async () => {
@@ -187,8 +191,18 @@ router.get("/bridge/status", requireAuth, (req, res) => {
     startedAt: d.startedAt,
   }));
 
+  // Formata a fila
+  const queue = downloadQueue.map((q, index) => ({
+    id: q.id,
+    name: q.name,
+    position: index + 1,
+    source: q.source,
+    addedAt: q.addedAt,
+  }));
+
   res.json({
     active,
+    queue,
     completed: completedDownloads,
   });
 });
@@ -271,6 +285,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         activeDownloads[id].phase = "error";
         activeDownloads[id].error = "Nenhum jogo Switch encontrado no torrent";
         torrent.destroy();
+        // Processa próximo da fila após erro
+        setTimeout(() => onDownloadComplete(id), 5000);
         return;
       }
 
@@ -424,8 +440,11 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             completedDownloads.pop();
           }
 
-          // Remove do ativo após 10 segundos
-          setTimeout(() => delete activeDownloads[id], 10000);
+          // Remove do ativo após 10 segundos e processa próximo da fila
+          setTimeout(() => {
+            delete activeDownloads[id];
+            onDownloadComplete(id);
+          }, 10000);
         } catch (err) {
           log(`═══════════════════════════════════════════════`, "ERROR");
           log(`❌ ERRO NO UPLOAD!`, "ERROR");
@@ -435,6 +454,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
 
           activeDownloads[id].error = err.message;
           activeDownloads[id].phase = "error";
+          // Processa próximo da fila após erro
+          setTimeout(() => onDownloadComplete(id), 5000);
         } finally {
           torrent.destroy();
           log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
@@ -445,6 +466,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         log(`❌ ERRO NO TORRENT: ${err.message}`, "ERROR");
         activeDownloads[id].error = err.message;
         activeDownloads[id].phase = "error";
+        // Processa próximo da fila após erro
+        setTimeout(() => onDownloadComplete(id), 5000);
       });
 
       torrent.on("warning", (warn) => {
@@ -455,6 +478,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
     log(`❌ ERRO ao adicionar torrent: ${err.message}`, "ERROR");
     activeDownloads[id].error = err.message;
     activeDownloads[id].phase = "error";
+    // Processa próximo da fila após erro
+    setTimeout(() => onDownloadComplete(id), 5000);
   }
 
   // Timeout de 5 minutos
@@ -463,9 +488,20 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       log(`⏰ TIMEOUT: Nenhum peer encontrado após 5 minutos`, "ERROR");
       activeDownloads[id].error = "Timeout: Nenhum peer encontrado";
       activeDownloads[id].phase = "error";
+      // Processa próximo da fila após timeout
+      setTimeout(() => onDownloadComplete(id), 5000);
     }
   }, 300000);
 }
+
+// ═══════════════════════════════════════════════
+// SMART STREAM UPLOAD (Buffer de 5MB)
+// ═══════════════════════════════════════════════
+// Usa buffering inteligente para não estourar a RAM
+// Pausa o stream, envia o chunk, e resume
+// ⚠️ 5MB é mais seguro para containers com pouca RAM
+
+const SMART_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB por chunk (otimizado para 1.5GB RAM)
 
 async function uploadFileToDropbox(
   file,
@@ -474,141 +510,260 @@ async function uploadFileToDropbox(
   totalFiles,
   currentIndex
 ) {
-  return new Promise((resolve, reject) => {
-    log(`📥 Lendo arquivo do disco...`, "UPLOAD");
+  const fileSize = file.length;
+  const fileSizeMB = fileSize / 1024 / 1024;
 
+  log(`🚀 Smart Stream iniciando: ${fileSizeMB.toFixed(2)} MB`, "UPLOAD");
+
+  // Arquivos pequenos (< 10MB): upload direto sem sessão
+  if (fileSize < SMART_CHUNK_SIZE) {
+    return uploadSmallFile(
+      file,
+      destPath,
+      downloadId,
+      totalFiles,
+      currentIndex
+    );
+  }
+
+  // Arquivos grandes: Smart Stream com sessão
+  return uploadWithSmartStream(
+    file,
+    destPath,
+    downloadId,
+    totalFiles,
+    currentIndex
+  );
+}
+
+// Upload direto para arquivos pequenos
+async function uploadSmallFile(
+  file,
+  destPath,
+  downloadId,
+  totalFiles,
+  currentIndex
+) {
+  return new Promise((resolve, reject) => {
     const chunks = [];
     const stream = file.createReadStream();
 
-    stream.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-
-    stream.on("error", (err) => {
-      log(`❌ Erro ao ler stream: ${err.message}`, "ERROR");
-      reject(err);
-    });
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", (err) => reject(err));
 
     stream.on("end", async () => {
-      const buffer = Buffer.concat(chunks);
-      const fileSizeMB = buffer.length / 1024 / 1024;
-
-      log(`📦 Buffer criado: ${fileSizeMB.toFixed(2)} MB`, "UPLOAD");
-
       try {
-        if (fileSizeMB > 150) {
-          log(`📤 Usando upload em SESSÃO (arquivo > 150MB)`, "UPLOAD");
-          await uploadLargeBuffer(buffer, destPath, downloadId);
-        } else {
-          log(`📤 Usando upload DIRETO (arquivo < 150MB)`, "UPLOAD");
+        const buffer = Buffer.concat(chunks);
+        log(
+          `📤 Upload direto: ${(buffer.length / 1024 / 1024).toFixed(2)} MB`,
+          "UPLOAD"
+        );
 
-          const result = await dbx.filesUpload({
-            path: destPath,
-            contents: buffer,
-            mode: { ".tag": "add" },
-            autorename: true,
-            mute: true,
-          });
+        const result = await dbx.filesUpload({
+          path: destPath,
+          contents: buffer,
+          mode: { ".tag": "add" },
+          autorename: true,
+          mute: true,
+        });
 
-          log(`✅ Dropbox confirmou: ${result.result.path_display}`, "UPLOAD");
-        }
-
-        const overallProgress = (
-          ((currentIndex + 1) / totalFiles) *
-          100
-        ).toFixed(1);
-        activeDownloads[downloadId].progressPercent = overallProgress;
-
+        log(`✅ Dropbox confirmou: ${result.result.path_display}`, "UPLOAD");
         resolve();
       } catch (err) {
-        log(`❌ Dropbox rejeitou upload!`, "ERROR");
-        log(`   Path: ${destPath}`, "ERROR");
-        log(`   Erro: ${err.message}`, "ERROR");
-
-        if (err.error) {
-          log(`   Detalhes: ${JSON.stringify(err.error)}`, "ERROR");
-        }
-
+        log(`❌ Upload falhou: ${err.message}`, "ERROR");
         reject(err);
       }
     });
   });
 }
 
-async function uploadLargeBuffer(buffer, destPath, downloadId) {
-  const CHUNK_SIZE = 8 * 1024 * 1024;
-  const totalSize = buffer.length;
-  let offset = 0;
+// Smart Stream para arquivos grandes (> 10MB)
+async function uploadWithSmartStream(
+  file,
+  destPath,
+  downloadId,
+  totalFiles,
+  currentIndex
+) {
+  return new Promise((resolve, reject) => {
+    const fileSize = file.length;
+    let sessionId = null;
+    let offset = 0;
+    let buffer = Buffer.alloc(0);
+    let chunkNum = 0;
 
-  log(
-    `📤 Upload em sessão: ${(totalSize / 1024 / 1024).toFixed(
-      2
-    )} MB em chunks de 8MB`,
-    "UPLOAD"
-  );
+    const stream = file.createReadStream();
 
-  // Primeiro chunk
-  const firstChunk = buffer.slice(0, Math.min(CHUNK_SIZE, totalSize));
-  log(`   Iniciando sessão com primeiro chunk...`, "UPLOAD");
+    log(
+      `📤 Smart Stream: ${(fileSize / 1024 / 1024).toFixed(
+        2
+      )} MB em chunks de 10MB`,
+      "UPLOAD"
+    );
 
-  const startResult = await dbx.filesUploadSessionStart({
-    close: false,
-    contents: firstChunk,
-  });
+    stream.on("data", async (chunk) => {
+      // Acumula no buffer
+      buffer = Buffer.concat([buffer, chunk]);
 
-  const sessionId = startResult.result.session_id;
-  offset = firstChunk.length;
-  log(`   Sessão criada: ${sessionId.substring(0, 15)}...`, "UPLOAD");
+      // Se o buffer encheu (10MB), hora de enviar!
+      if (buffer.length >= SMART_CHUNK_SIZE) {
+        // PAUSA o stream para não estourar a memória
+        stream.pause();
 
-  // Chunks intermediários
-  let chunkNum = 1;
-  while (offset < totalSize - CHUNK_SIZE) {
-    chunkNum++;
-    const chunk = buffer.slice(offset, offset + CHUNK_SIZE);
+        try {
+          const chunkToSend = buffer.slice(0, SMART_CHUNK_SIZE);
+          const remaining = buffer.slice(SMART_CHUNK_SIZE);
+          chunkNum++;
 
-    await dbx.filesUploadSessionAppendV2({
-      cursor: { session_id: sessionId, offset: offset },
-      close: false,
-      contents: chunk,
+          if (offset === 0) {
+            // Primeiro chunk: inicia sessão
+            log(`   🔗 Iniciando sessão Dropbox...`, "UPLOAD");
+            const res = await dbx.filesUploadSessionStart({
+              close: false,
+              contents: chunkToSend,
+            });
+            sessionId = res.result.session_id;
+            log(
+              `   ✓ Sessão criada: ${sessionId.substring(0, 12)}...`,
+              "UPLOAD"
+            );
+          } else {
+            // Chunks intermediários
+            await dbx.filesUploadSessionAppendV2({
+              cursor: { session_id: sessionId, offset: offset },
+              close: false,
+              contents: chunkToSend,
+            });
+          }
+
+          offset += chunkToSend.length;
+          buffer = remaining;
+
+          // Atualiza progresso visual
+          const percent = ((offset / fileSize) * 100).toFixed(1);
+          activeDownloads[downloadId].uploadSpeed = `Chunk ${chunkNum}`;
+          log(
+            `   📦 Chunk ${chunkNum}: ${percent}% (${(
+              offset /
+              1024 /
+              1024
+            ).toFixed(1)} MB)`,
+            "UPLOAD"
+          );
+
+          // RETOMA o stream
+          stream.resume();
+        } catch (err) {
+          stream.destroy();
+          log(`❌ Erro no chunk ${chunkNum}: ${err.message}`, "ERROR");
+          reject(err);
+        }
+      }
     });
 
-    offset += chunk.length;
-    const progress = ((offset / totalSize) * 100).toFixed(0);
-    activeDownloads[downloadId].state = `📤 Enviando... ${progress}%`;
+    stream.on("end", async () => {
+      // Envia o que sobrou no buffer (último chunk)
+      try {
+        if (buffer.length > 0 || offset === 0) {
+          if (offset === 0) {
+            // Arquivo pequeno que não encheu nenhum chunk
+            log(`   📤 Upload único (arquivo não encheu chunk)`, "UPLOAD");
+            const res = await dbx.filesUploadSessionStart({
+              close: false,
+              contents: buffer,
+            });
+            sessionId = res.result.session_id;
+            offset = buffer.length;
+          }
 
-    log(`   Chunk ${chunkNum}: ${progress}% enviado`, "UPLOAD");
-  }
+          // Finaliza a sessão
+          log(
+            `   🏁 Finalizando sessão (${(buffer.length / 1024 / 1024).toFixed(
+              2
+            )} MB restantes)...`,
+            "UPLOAD"
+          );
 
-  // Último chunk
-  const lastChunk = buffer.slice(offset);
-  log(`   Finalizando sessão com último chunk...`, "UPLOAD");
+          await dbx.filesUploadSessionFinish({
+            cursor: { session_id: sessionId, offset: offset },
+            commit: {
+              path: destPath,
+              mode: { ".tag": "add" },
+              autorename: true,
+              mute: true,
+            },
+            contents: buffer,
+          });
+        } else if (sessionId) {
+          // Buffer vazio, só finaliza
+          await dbx.filesUploadSessionFinish({
+            cursor: { session_id: sessionId, offset: offset },
+            commit: {
+              path: destPath,
+              mode: { ".tag": "add" },
+              autorename: true,
+              mute: true,
+            },
+            contents: Buffer.alloc(0),
+          });
+        }
 
-  await dbx.filesUploadSessionFinish({
-    cursor: { session_id: sessionId, offset: offset },
-    commit: {
-      path: destPath,
-      mode: { ".tag": "add" },
-      autorename: true,
-      mute: true,
-    },
-    contents: lastChunk,
+        log(`✅ Smart Stream concluído: ${destPath}`, "UPLOAD");
+        resolve();
+      } catch (err) {
+        log(`❌ Erro ao finalizar: ${err.message}`, "ERROR");
+        reject(err);
+      }
+    });
+
+    stream.on("error", (err) => {
+      log(`❌ Stream error: ${err.message}`, "ERROR");
+      reject(err);
+    });
   });
-
-  log(`✅ Sessão finalizada com sucesso!`, "UPLOAD");
 }
 
-// --- ROTAS DE UPLOAD ---
-router.post("/bridge/upload", requireAuth, async (req, res) => {
-  const magnet = req.body.magnet;
-  if (!magnet) return res.status(400).json({ error: "Magnet link vazio" });
+// --- HELPER: Conta downloads ativos ---
+function countActiveDownloads() {
+  return Object.values(activeDownloads).filter(
+    (d) => d.phase !== "done" && d.phase !== "error"
+  ).length;
+}
 
-  const id = Date.now().toString();
+// ═══════════════════════════════════════════════
+// SISTEMA DE FILA DE DOWNLOADS
+// ═══════════════════════════════════════════════
 
-  activeDownloads[id] = {
-    id,
-    name: "Conectando...",
+function addToQueue(queueItem) {
+  downloadQueue.push(queueItem);
+  log(
+    `📋 Adicionado à fila: ${queueItem.name} (Posição: ${downloadQueue.length})`,
+    "QUEUE"
+  );
+
+  // Tenta processar a fila
+  processQueue();
+}
+
+function processQueue() {
+  // Se já está processando ou tem download ativo, não faz nada
+  if (isProcessingQueue) return;
+  if (countActiveDownloads() >= MAX_CONCURRENT_DOWNLOADS) return;
+  if (downloadQueue.length === 0) return;
+
+  isProcessingQueue = true;
+
+  // Pega o próximo da fila
+  const next = downloadQueue.shift();
+  log(`🚀 Iniciando da fila: ${next.name}`, "QUEUE");
+
+  // Cria o registro de download ativo
+  activeDownloads[next.id] = {
+    id: next.id,
+    name: next.name,
     phase: "connecting",
     startedAt: new Date().toISOString(),
+    source: next.source,
     // Download
     downloadPercent: 0,
     downloadSpeed: "-- MB/s",
@@ -630,10 +785,76 @@ router.post("/bridge/upload", requireAuth, async (req, res) => {
     error: null,
   };
 
-  activeDownloads[id].source = "magnet";
+  // Inicia o processamento do torrent
+  processTorrent(next.input, next.id, next.source);
+
+  isProcessingQueue = false;
+}
+
+// Chamado quando um download termina (sucesso ou erro)
+function onDownloadComplete(id) {
+  log(`✅ Download ${id} finalizado. Verificando fila...`, "QUEUE");
+
+  // Pequeno delay para garantir que tudo foi limpo
+  setTimeout(() => {
+    if (downloadQueue.length > 0) {
+      log(
+        `📋 Fila tem ${downloadQueue.length} item(s). Processando próximo...`,
+        "QUEUE"
+      );
+      processQueue();
+    } else {
+      log(`📋 Fila vazia. Aguardando novos downloads.`, "QUEUE");
+    }
+  }, 2000);
+}
+
+// --- ROTAS DE UPLOAD ---
+router.post("/bridge/upload", requireAuth, async (req, res) => {
+  const magnet = req.body.magnet;
+  if (!magnet) return res.status(400).json({ error: "Magnet link vazio" });
+
+  const id = Date.now().toString();
+
+  // Extrai nome do magnet (se disponível)
+  const nameMatch = magnet.match(/dn=([^&]+)/);
+  const displayName = nameMatch
+    ? decodeURIComponent(nameMatch[1])
+    : "Magnet Link";
+
   log(`📨 Magnet recebido: ${magnet.substring(0, 60)}...`, "API");
-  processTorrent(magnet, id, "magnet");
-  res.json({ success: true, id });
+
+  // Cria item da fila
+  const queueItem = {
+    id,
+    name: displayName,
+    input: magnet,
+    source: "magnet",
+    addedAt: new Date().toISOString(),
+  };
+
+  // Se não tem downloads ativos, inicia direto
+  if (countActiveDownloads() < MAX_CONCURRENT_DOWNLOADS) {
+    addToQueue(queueItem);
+    res.json({
+      success: true,
+      id,
+      queued: false,
+      message: "Download iniciado!",
+    });
+  } else {
+    // Adiciona na fila para processar depois
+    downloadQueue.push(queueItem);
+    const position = downloadQueue.length;
+    log(`📋 Magnet adicionado à fila (Posição: ${position})`, "QUEUE");
+    res.json({
+      success: true,
+      id,
+      queued: true,
+      position,
+      message: `Adicionado à fila (posição ${position})`,
+    });
+  }
 });
 
 router.post(
@@ -646,40 +867,44 @@ router.post(
     }
 
     const id = Date.now().toString();
+    const displayName = req.file.originalname.replace(".torrent", "");
 
-    activeDownloads[id] = {
-      id,
-      name: req.file.originalname,
-      phase: "connecting",
-      startedAt: new Date().toISOString(),
-      // Download
-      downloadPercent: 0,
-      downloadSpeed: "-- MB/s",
-      downloaded: "0 MB",
-      total: "-- MB",
-      peers: 0,
-      downloadEta: "--:--",
-      downloadDone: false,
-      // Upload
-      uploadPercent: 0,
-      uploadSpeed: "-- MB/s",
-      uploadedBytes: "0 MB",
-      uploadTotal: "-- MB",
-      currentFile: "",
-      fileIndex: 0,
-      totalFiles: 0,
-      uploadDone: false,
-      // Error
-      error: null,
-    };
-
-    activeDownloads[id].source = "torrent-file";
     log(
       `📨 Arquivo .torrent recebido: ${req.file.originalname} (${req.file.size} bytes)`,
       "API"
     );
-    processTorrent(req.file.buffer, id, "torrent-file");
-    res.json({ success: true, id });
+
+    // Cria item da fila
+    const queueItem = {
+      id,
+      name: displayName,
+      input: req.file.buffer,
+      source: "torrent-file",
+      addedAt: new Date().toISOString(),
+    };
+
+    // Se não tem downloads ativos, inicia direto
+    if (countActiveDownloads() < MAX_CONCURRENT_DOWNLOADS) {
+      addToQueue(queueItem);
+      res.json({
+        success: true,
+        id,
+        queued: false,
+        message: "Download iniciado!",
+      });
+    } else {
+      // Adiciona na fila para processar depois
+      downloadQueue.push(queueItem);
+      const position = downloadQueue.length;
+      log(`📋 Torrent adicionado à fila (Posição: ${position})`, "QUEUE");
+      res.json({
+        success: true,
+        id,
+        queued: true,
+        position,
+        message: `Adicionado à fila (posição ${position})`,
+      });
+    }
   }
 );
 

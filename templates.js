@@ -558,6 +558,66 @@ export function dashboardTemplate() {
             font-size: 0.85rem;
         }
         .hidden { display: none !important; }
+        
+        /* Queue Cards */
+        .queue-card {
+            background: var(--card);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--text-muted);
+            padding: 14px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .queue-info { flex: 1; }
+        .queue-name {
+            color: var(--white);
+            font-weight: 500;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+        .queue-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .queue-position {
+            background: rgba(139, 156, 179, 0.15);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        .notification.success {
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+        }
+        .notification.info {
+            background: rgba(99, 102, 241, 0.9);
+            color: white;
+        }
+        .notification.error {
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -610,6 +670,9 @@ export function dashboardTemplate() {
             <button class="section-tab active" onclick="switchSection('active')">
                 ⚡ Em andamento <span id="active-count" class="count">0</span>
             </button>
+            <button class="section-tab" onclick="switchSection('queue')">
+                📋 Na Fila <span id="queue-count" class="count">0</span>
+            </button>
             <button class="section-tab" onclick="switchSection('completed')">
                 ✓ Finalizados <span id="completed-count" class="count">0</span>
             </button>
@@ -618,6 +681,12 @@ export function dashboardTemplate() {
         <div id="active-section" class="section active">
             <div id="downloads-list" class="grid">
                 <div class="empty">Nenhum download em andamento</div>
+            </div>
+        </div>
+
+        <div id="queue-section" class="section">
+            <div id="queue-list" class="grid">
+                <div class="empty">Fila vazia</div>
             </div>
         </div>
 
@@ -631,6 +700,18 @@ export function dashboardTemplate() {
     <script>
         let selectedFile = null;
         let knownIds = new Set();
+        
+        function showNotification(message, type = 'info') {
+            const existing = document.querySelector('.notification');
+            if (existing) existing.remove();
+            
+            const notif = document.createElement('div');
+            notif.className = 'notification ' + type;
+            notif.textContent = message;
+            document.body.appendChild(notif);
+            
+            setTimeout(() => notif.remove(), 4000);
+        }
         
         function switchInputTab(tab) {
             document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
@@ -695,11 +776,16 @@ export function dashboardTemplate() {
                 
                 if (res.status === 401) return window.location.href = '/admin/login';
                 
+                const data = await res.json();
                 if(res.ok) {
                     document.getElementById('magnet').value = '';
+                    if (data.queued) {
+                        showNotification(\`📋 Adicionado à fila (posição \${data.position})\`, 'info');
+                    } else {
+                        showNotification('🚀 Download iniciado!', 'success');
+                    }
                     loadStatus();
                 } else {
-                    const data = await res.json();
                     alert(data.error || 'Erro ao iniciar.');
                 }
             } catch(e) { 
@@ -730,14 +816,19 @@ export function dashboardTemplate() {
                 
                 if (res.status === 401) return window.location.href = '/admin/login';
                 
+                const data = await res.json();
                 if(res.ok) {
                     document.getElementById('torrentFile').value = '';
                     document.getElementById('selectedFile').textContent = '';
                     document.getElementById('uploadTorrentBtn').classList.remove('show');
                     selectedFile = null;
+                    if (data.queued) {
+                        showNotification(\`📋 Adicionado à fila (posição \${data.position})\`, 'info');
+                    } else {
+                        showNotification('🚀 Download iniciado!', 'success');
+                    }
                     loadStatus();
                 } else {
-                    const data = await res.json();
                     alert(data.error || 'Erro ao processar.');
                 }
             } catch(e) { 
@@ -780,9 +871,11 @@ export function dashboardTemplate() {
                 
                 const data = await res.json();
                 const activeList = data.active || [];
+                const queueList = data.queue || [];
                 const completedList = data.completed || [];
 
                 document.getElementById('active-count').textContent = activeList.length;
+                document.getElementById('queue-count').textContent = queueList.length;
                 document.getElementById('completed-count').textContent = completedList.length;
 
                 // Render active downloads
@@ -822,6 +915,25 @@ export function dashboardTemplate() {
                     });
                     
                     knownIds = currentIds;
+                }
+
+                // Render queue
+                const queueContainer = document.getElementById('queue-list');
+                if (queueList.length === 0) {
+                    queueContainer.innerHTML = '<div class="empty">Fila vazia - próximo download inicia automaticamente</div>';
+                } else {
+                    queueContainer.innerHTML = queueList.map(item => \`
+                        <div class="queue-card">
+                            <div class="queue-info">
+                                <div class="queue-name">\${item.name}</div>
+                                <div class="queue-meta">
+                                    \${item.source === 'magnet' ? '🔗 Magnet' : '📁 Torrent'} • 
+                                    Adicionado às \${formatTime(item.addedAt)}
+                                </div>
+                            </div>
+                            <span class="queue-position">#\${item.position}</span>
+                        </div>
+                    \`).join('');
                 }
 
                 // Render completed
