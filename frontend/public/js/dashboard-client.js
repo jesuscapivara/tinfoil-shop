@@ -697,7 +697,7 @@ async function loadGames() {
   }
 }
 
-// Função para renderizar jogos (ATUALIZADA COM LÓGICA DE BASE ID)
+// Função para renderizar jogos (LÓGICA DE IDS REFINADA v2)
 function renderGames(games) {
   const list = document.getElementById("games-list");
 
@@ -719,81 +719,111 @@ function renderGames(games) {
       let tinfoilUrl = "#";
 
       if (game.id) {
-        // 🧠 A MÁGICA DOS IDS NINTENDO
-        // Padrão Nintendo Switch:
-        // - Jogo Base: termina em 000 (ex: 010073C01AF34000)
-        // - UPDATE: termina em 800 (ex: 010073C01AF34800)
-        // - DLC: termina em 001, 002, 003, etc. (ex: 010073C01AF35001, 010073C01AF35002)
-
-        // Pega os últimos 3 caracteres
+        // Padrão Nintendo: 16 chars Hex
         const suffix = game.id.slice(-3).toUpperCase();
 
-        // Calcula o BaseID (Zera os últimos 3 dígitos para achar a capa do jogo original)
-        const baseId = game.id.substring(0, 13) + "000";
+        // 1. Definição do Tipo (Base, Update, DLC)
+        let type = "BASE";
+        if (suffix === "800") type = "UPDATE";
+        else if (suffix !== "000") type = "DLC";
 
-        // Define a URL da imagem usando o BaseID
-        imgUrl = `https://tinfoil.media/ti/${baseId}/256/256/`;
-        tinfoilUrl = `https://tinfoil.io/Title/${baseId}`;
+        // 2. Lógica para encontrar o ID da Imagem (Capa do Jogo Base)
+        let imageId = game.id; // Por padrão tenta o próprio ID
 
-        // Lógica do Badge (Selo)
-        if (suffix === "800") {
-          // UPDATE: Termina em 800
+        if (type === "UPDATE") {
+          // Update é fácil: muda final 800 para 000
+          imageId = game.id.substring(0, 13) + "000";
           badgeHtml = `<span class="type-badge badge-upd">UPDATE</span>`;
-        } else if (suffix !== "000" && /^[0-9A-F]{3}$/.test(suffix)) {
-          // DLC: Termina em qualquer número hexadecimal de 3 dígitos que não seja 000 ou 800
-          // Exemplos: 001, 002, 003, 004, 010, 0FF, etc.
+        } else if (type === "DLC") {
           badgeHtml = `<span class="type-badge badge-dlc">DLC</span>`;
+
+          // --- ESTRATÉGIA HÍBRIDA PARA CAPA DE DLC ---
+
+          // A) Tentativa de encontrar o Pai na lista atual (Application Group Match)
+          // Os primeiros 12 caracteres (Application Group) geralmente são iguais
+          const appGroup = game.id.substring(0, 12);
+
+          // Procura na memória global (allGames) algum jogo que comece igual e termine em 000
+          const parentGame = allGames.find(
+            (g) => g.id && g.id.startsWith(appGroup) && g.id.endsWith("000")
+          );
+
+          if (parentGame) {
+            // [Sucesso Absoluto] Encontramos o pai na lista
+            imageId = parentGame.id;
+          } else {
+            // B) Fallback Heurístico (Engenharia Reversa de Nibble)
+            // Muitas vezes a DLC incrementa o 13º digito. Ex: Base ...E000 -> DLC ...F001
+            // Vamos tentar subtrair 1 do 13º digito hexadecimal
+            try {
+              const nibbleChar = game.id[12]; // 13º char (índice 12)
+              const nibbleVal = parseInt(nibbleChar, 16);
+
+              if (!isNaN(nibbleVal) && nibbleVal > 0) {
+                const prevNibble = (nibbleVal - 1).toString(16).toUpperCase();
+                imageId = appGroup + prevNibble + "000";
+              } else {
+                // Se for 0 ou falhar, fallback burro para o padrão
+                imageId = game.id.substring(0, 13) + "000";
+              }
+            } catch (e) {
+              imageId = game.id.substring(0, 13) + "000";
+            }
+          }
         }
-        // Se for '000', é o jogo base, não precisa de selo.
+
+        // Define URLs finais
+        imgUrl = `https://tinfoil.media/ti/${imageId}/256/256/`;
+        tinfoilUrl = `https://tinfoil.io/Title/${imageId}`; // Link info aponta pro base
       }
 
       return `
-            <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
-                
-                <div style="flex-shrink: 0; position: relative; width: 80px; height: 80px;">
-                    <img src="${imgUrl}" 
-                         alt="${game.name}" 
-                         style="width: 100%; height: 100%; border-radius: 8px; object-fit: cover; background: #000;"
-                         onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
-                    
-                    ${badgeHtml}
-                </div>
+      <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
+        
+        <div style="flex-shrink: 0; position: relative; width: 80px; height: 80px;">
+          <img src="${imgUrl}" 
+               alt="${game.name}" 
+               style="width: 100%; height: 100%; border-radius: 8px; object-fit: cover; background: #000;"
+               onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
+          
+          ${badgeHtml}
+        </div>
 
-                <div style="flex: 1; min-width: 0;">
-                    <div class="card-header" style="margin-bottom: 5px;">
-                        <span class="game-name" title="${
-                          game.name
-                        }" style="font-size: 1rem;">${game.name}</span>
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted); align-items: center;">
-                        <span class="status-badge online">${sizeDisplay}</span>
-                        ${
-                          game.id
-                            ? `<span class="status-badge" style="font-family: monospace; opacity: 0.7;">${game.id}</span>`
-                            : ""
-                        }
-                    </div>
-                    
-                    <div style="margin-top: 10px; display: flex; gap: 10px;">
-                        <button onclick="window.open('${
-                          game.url
-                        }', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
-                            📥 Download
-                        </button>
-                        ${
-                          game.id
-                            ? `
-                            <button onclick="window.open('${tinfoilUrl}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
-                                🔗 Info
-                            </button>
-                        `
-                            : ""
-                        }
-                    </div>
-                </div>
-            </div>
-        `;
+        <div style="flex: 1; min-width: 0;">
+          <div class="card-header" style="margin-bottom: 5px;">
+            <span class="game-name" title="${
+              game.name
+            }" style="font-size: 1rem;">${game.name}</span>
+          </div>
+          
+          <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted); align-items: center;">
+            <span class="status-badge online">${sizeDisplay}</span>
+            ${
+              game.id
+                ? `<span class="status-badge" style="font-family: monospace; opacity: 0.7;">${game.id}</span>`
+                : ""
+            }
+          </div>
+          
+          <div style="margin-top: 10px; display: flex; gap: 10px;">
+            <button onclick="window.open('${
+              game.url
+            }', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
+              📥 Download
+            </button>
+            ${
+              game.id
+                ? `
+              <button onclick="window.open('${tinfoilUrl}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
+                🔗 Info
+              </button>
+            `
+                : ""
+            }
+          </div>
+        </div>
+      </div>
+    `;
     })
     .join("");
 }
