@@ -45,7 +45,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // Log inicial de config
 console.log("═══════════════════════════════════════════════");
-console.log("🎮 MANA BRIDGE - Inicialização");
+console.log("🎮 CAPIVARA BRIDGE - Inicialização");
 console.log("═══════════════════════════════════════════════");
 console.log(`   Ambiente: ${IS_PRODUCTION ? "PRODUÇÃO" : "LOCAL"}`);
 console.log(`   Admin Email: ${ADMIN_EMAIL ? "✓" : "✗ FALTANDO"}`);
@@ -67,12 +67,12 @@ client.on("error", (err) =>
 );
 
 let activeDownloads = {};
-let completedDownloads = []; // Histórico de downloads finalizados (carregado do MongoDB)
-let downloadQueue = []; // 🚦 FILA DE DOWNLOADS
-let isProcessingQueue = false; // Flag para evitar processamento duplo
+let completedDownloads = [];
+let downloadQueue = [];
+let isProcessingQueue = false;
 
-const MAX_COMPLETED = 50; // Mantém últimos 50 finalizados
-const MAX_CONCURRENT_DOWNLOADS = 1; // ⚠️ LIMITE: Apenas 1 download por vez (protege RAM)
+const MAX_COMPLETED = 50;
+const MAX_CONCURRENT_DOWNLOADS = 1;
 
 // Carrega histórico do MongoDB na inicialização
 (async () => {
@@ -98,7 +98,6 @@ const MAX_CONCURRENT_DOWNLOADS = 1; // ⚠️ LIMITE: Apenas 1 download por vez 
 })();
 
 // --- HELPERS ---
-// ✅ Gera token JWT seguro (substitui Base64 vulnerável)
 const generateToken = (payload) => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "1d" });
 };
@@ -131,14 +130,11 @@ export const requireAuth = async (req, res, next) => {
     try {
       token = decodeURIComponent(token);
     } catch (e) {
-      // Ignora erro de decode
     }
 
-    // ✅ Verifica token JWT
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
 
-      // Se for admin
       if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
         req.user = decoded;
         return next();
@@ -181,7 +177,7 @@ router.post("/bridge/register", async (req, res) => {
     return res.status(400).json({ error: "Email já cadastrado" });
   }
 
-  // Cria usuário (isApproved = false)
+  // Cria usuário
   const newUser = await createUser(email, password, false);
 
   if (newUser) {
@@ -210,11 +206,8 @@ router.get("/", async (req, res) => {
       // Ignora erro de decode
     }
 
-    // ✅ Verifica token JWT
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
-
-      // Se for admin ou usuário aprovado, redireciona
       if (
         (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) ||
         (decoded.role === "user" && decoded.id)
@@ -226,7 +219,6 @@ router.get("/", async (req, res) => {
         }
       }
     } catch (err) {
-      // Token inválido, continua para login
     }
   }
 
@@ -248,7 +240,6 @@ router.get("/admin/login", async (req, res) => {
       // Ignora erro de decode
     }
 
-    // ✅ Verifica token JWT
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
 
@@ -277,7 +268,6 @@ router.post("/bridge/auth", async (req, res) => {
 
   // 1. Verifica se é o Admin Supremo (.env)
   if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
-    // ✅ Gera token JWT seguro
     const token = generateToken({
       email: ADMIN_EMAIL,
       role: "admin",
@@ -292,10 +282,8 @@ router.post("/bridge/auth", async (req, res) => {
   // 2. Verifica se é usuário normal (MongoDB)
   const user = await findUserByEmail(email);
   if (user) {
-    // ✅ Compara senha com bcrypt
     const validPass = await bcrypt.compare(password, user.password);
     if (validPass) {
-      // ✅ Gera token JWT seguro
       const token = generateToken({
         id: user._id.toString(),
         email: user.email,
@@ -315,17 +303,16 @@ router.post("/bridge/auth", async (req, res) => {
 // ROTA PARA OBTER DADOS DO USUÁRIO (Para o Dashboard)
 // --- API: DADOS DO USUÁRIO LOGADO ---
 router.get("/bridge/me", requireAuth, async (req, res) => {
-  // ✅ Usuário já está em req.user pelo middleware requireAuth
   const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
 
-  // Se for Admin Supremo
+
   if (req.user.role === "admin") {
     return res.json({
       email: ADMIN_EMAIL,
       isAdmin: true,
       isApproved: true,
       tinfoilUser: "admin",
-      tinfoilPass: "*********", // Admin usa .env, ocultamos por padrão
+      tinfoilPass: "*********", 
       host: `${DOMAIN}/api`,
       protocol: "https",
     });
@@ -341,7 +328,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
         isAdmin: user.isAdmin,
         isApproved: user.isApproved,
         tinfoilUser: user.tinfoilUser,
-        tinfoilPass: null, // ✅ Não enviamos o hash para o front!
+        tinfoilPass: null,
         host: `${DOMAIN}/api`,
         protocol: "https",
       });
@@ -356,7 +343,6 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
 
 // NOVA ROTA: REGENERAR CREDENCIAIS TINFOIL
 router.post("/bridge/regenerate-credentials", requireAuth, async (req, res) => {
-  // Apenas usuários comuns podem regenerar via banco. Admin usa .env.
   if (req.user.role === "admin") {
     return res.status(400).json({ error: "Admin deve alterar senha no .env" });
   }
@@ -378,7 +364,6 @@ router.post("/bridge/regenerate-credentials", requireAuth, async (req, res) => {
 
     console.log(`[AUTH] 🔄 Credenciais regeneradas para: ${user.email}`);
 
-    // Retorna a senha PLAIN para o usuário ver (apenas agora)
     res.json({ success: true, newPass: newPassPlain });
   } catch (e) {
     console.error("[AUTH] Erro ao regenerar:", e);
@@ -396,7 +381,6 @@ router.get("/bridge/users/pending", requireAuth, async (req, res) => {
 router.post("/bridge/users/approve/:id", requireAuth, async (req, res) => {
   const user = await approveUser(req.params.id);
   if (user) {
-    // ✅ Gera nova senha Tinfoil (mais seguro que tentar recuperar a antiga)
     const newTinfoilPass = Math.random().toString(36).slice(-6).toUpperCase();
     const salt = await bcrypt.genSalt(10);
     const tinfoilPassHash = await bcrypt.hash(newTinfoilPass, salt);

@@ -14,8 +14,6 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-// ✅ requireAuth já foi importado acima do manaBridge.js (DRY - Don't Repeat Yourself)
-
 const PORT = process.env.PORT || 8080;
 const ROOT_GAMES_FOLDER = "/Games_Switch";
 
@@ -108,9 +106,6 @@ async function getDirectLink(path) {
 
 // 🔍 EXTRAÇÃO DE TITLE ID MELHORADA
 function parseGameInfo(fileName) {
-  // Tenta achar o primeiro ID hexadecimal de 16 caracteres entre colchetes [0100...]
-  // Exemplo: "Hollow Knight Silksong [010013C00E930800][v589824].nsz"
-  // Deve pegar: 010013C00E930800 (o primeiro Title ID, não a versão)
 
   // Busca todos os matches de [16 caracteres hex]
   const regex = /\[([0-9A-Fa-f]{16})\]/g;
@@ -185,7 +180,7 @@ async function buildGameIndex() {
         url: directUrl,
         size: file.size,
         name: name,
-        id: id, // ✅ Agora enviamos o ID explicitamente!
+        id: id,
       };
     });
 
@@ -199,7 +194,6 @@ async function buildGameIndex() {
     log.error("FALHA INDEXAÇÃO:", e);
     indexingProgress = `Erro: ${e.message || "Erro desconhecido"}`;
   } finally {
-    // ✅ Garante que isIndexing sempre volta para false, mesmo se o mundo acabar
     isIndexing = false;
   }
 }
