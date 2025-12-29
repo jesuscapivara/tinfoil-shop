@@ -477,6 +477,32 @@ function log(msg, type = "INFO") {
   console.log(`[${timestamp}] [${type}] ${msg}`);
 }
 
+// ═══════════════════════════════════════════════
+// HELPER: DESTROY SEGURO DE TORRENT
+// ═══════════════════════════════════════════════
+
+function safeDestroyTorrent(torrent, torrentInstance = null) {
+  try {
+    if (torrent && !torrent.destroyed) {
+      torrent.destroy();
+      return true;
+    }
+  } catch (err) {
+    // Ignora erro se já foi destruído
+  }
+
+  try {
+    if (torrentInstance && !torrentInstance.destroyed) {
+      torrentInstance.destroy();
+      return true;
+    }
+  } catch (err) {
+    // Ignora erro se já foi destruído
+  }
+
+  return false;
+}
+
 function extractGameName(fileName) {
   let name = fileName
     .replace(/\.(nsp|nsz|xci)$/i, "")
@@ -563,7 +589,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             activeDownloads[id].errorTimestamp = Date.now(); // Marca quando o erro ocorreu
 
             // Destrói o torrent imediatamente para não baixar nada
-            torrent.destroy();
+            safeDestroyTorrent(torrent, activeDownloads[id]?.torrentInstance);
 
             // Remove da lista ativa após 1 minuto (auto-remoção)
             setTimeout(() => {
@@ -603,7 +629,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           activeDownloads[id].error =
             "Nenhum jogo Switch encontrado no torrent";
           activeDownloads[id].errorTimestamp = Date.now();
-          torrent.destroy();
+          safeDestroyTorrent(torrent, activeDownloads[id]?.torrentInstance);
           // Auto-remoção após 1 minuto
           setTimeout(() => {
             if (activeDownloads[id] && activeDownloads[id].phase === "error") {
@@ -872,8 +898,28 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
               }
             }, 60000);
           } finally {
-            torrent.destroy();
-            log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
+            // 🛡️ BLINDAGEM CONTRA CRASH
+            try {
+              if (
+                safeDestroyTorrent(
+                  torrent,
+                  activeDownloads[id]?.torrentInstance
+                )
+              ) {
+                log(`🗑️ Torrent destruído com sucesso`, "TORRENT");
+              }
+            } catch (errDestroy) {
+              log(
+                `⚠️ Erro não fatal ao destruir torrent: ${errDestroy.message}`,
+                "WARN"
+              );
+            }
+
+            // Remove do ativo após 10 segundos
+            setTimeout(() => {
+              if (activeDownloads[id]) delete activeDownloads[id];
+              onDownloadComplete(id);
+            }, 10000);
           }
         });
 
@@ -1395,7 +1441,7 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
     timeoutId = setTimeout(() => {
       if (previewTorrent) {
         try {
-          previewTorrent.destroy();
+          safeDestroyTorrent(previewTorrent);
           client.remove(previewTorrent);
         } catch (e) {
           // Ignora erros ao remover
@@ -1490,7 +1536,7 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
         // Remove o torrent após obter informações
         setTimeout(() => {
           try {
-            torrent.destroy();
+            safeDestroyTorrent(torrent);
             client.remove(torrent);
           } catch (e) {
             // Ignora erros ao remover
@@ -1506,7 +1552,7 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
         clearTimeout(timeoutId);
         try {
           if (previewTorrent) {
-            previewTorrent.destroy();
+            safeDestroyTorrent(previewTorrent);
             client.remove(previewTorrent);
           }
         } catch (e) {
@@ -1657,13 +1703,13 @@ router.post("/bridge/cancel/:id", requireAuth, (req, res) => {
     // ⚠️ FLAG CRÍTICA: Para o upload instantaneamente
     download.isCancelled = true;
 
-    // Destrói o torrent se existir (tenta ambas as referências)
-    if (download.torrent) {
-      download.torrent.destroy();
-      log(`🗑️ Torrent ${id} destruído pelo usuário`, "CANCEL");
-    } else if (download.torrentInstance) {
-      download.torrentInstance.destroy();
-      log(`🗑️ Torrent instance ${id} destruído pelo usuário`, "CANCEL");
+    // Destrói o torrent se existir (blindado)
+    try {
+      if (safeDestroyTorrent(download.torrent, download.torrentInstance)) {
+        log(`🗑️ Torrent ${id} destruído pelo usuário`, "CANCEL");
+      }
+    } catch (e) {
+      log(`⚠️ Ignorando erro de destroy no cancelamento: ${e.message}`, "WARN");
     }
 
     // Marca como cancelado
