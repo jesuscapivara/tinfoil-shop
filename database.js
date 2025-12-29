@@ -5,6 +5,7 @@
 
 import mongoose from "mongoose";
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 
 dotenv.config();
 
@@ -95,9 +96,13 @@ export async function createUser(email, webPassword, isAdmin = false) {
   const tinfoilPass = Math.random().toString(36).slice(-6).toUpperCase(); // 6 caracteres
 
   try {
+    // Hash da senha com bcrypt
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(webPassword, salt);
+
     const user = new User({
       email,
-      password: webPassword, // Em produção real, use bcrypt. Aqui vamos simples.
+      password: hashedPassword, // ✅ Senha hasheada com bcrypt
       isAdmin,
       isApproved: isAdmin, // Se for admin, já nasce aprovado. Se for user, nasce pendente.
       tinfoilUser,

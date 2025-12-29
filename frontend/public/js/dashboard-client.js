@@ -5,6 +5,14 @@ let selectedFile = null;
 let knownIds = new Set();
 let allGames = []; // Armazena todos os jogos para filtro
 
+// ✅ Função de escape HTML para prevenir XSS
+function escapeHtml(text) {
+  if (!text) return text;
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function showNotification(message, type = "info") {
   const existing = document.querySelector(".notification");
   if (existing) existing.remove();
@@ -287,7 +295,7 @@ async function loadStatus() {
           (item) => `
                 <div class="queue-card">
                     <div class="queue-info">
-                        <div class="queue-name">${item.name}</div>
+                        <div class="queue-name">${escapeHtml(item.name)}</div>
                         <div class="queue-meta">
                             ${
                               item.source === "magnet"
@@ -315,7 +323,9 @@ async function loadStatus() {
           (item) => `
                 <div class="completed-card">
                     <div class="completed-info">
-                        <div class="completed-name">${item.name}</div>
+                        <div class="completed-name">${escapeHtml(
+                          item.name
+                        )}</div>
                         <div class="completed-meta">
                             ${item.files} arquivo(s) • ${
             item.size
@@ -379,7 +389,7 @@ function buildActiveCard(item) {
         <div class="card-main">
             <div class="card-header">
                 <div class="card-header-left">
-                    <span class="game-name">${item.name}</span>
+                    <span class="game-name">${escapeHtml(item.name)}</span>
                     <span class="phase-badge phase-${
                       item.phase
                     }">${getPhaseLabel(item.phase)}</span>
@@ -423,7 +433,11 @@ function buildActiveCard(item) {
             
             <div class="status-text">${statusText}</div>
             
-            ${isError ? `<div class="error-msg">❌ ${item.error}</div>` : ""}
+            ${
+              isError
+                ? `<div class="error-msg">❌ ${escapeHtml(item.error)}</div>`
+                : ""
+            }
         </div>
         
         <div class="stats-row">
@@ -617,7 +631,7 @@ async function loadPendingUsers() {
         (u) => `
             <div class="card">
                 <div class="card-header">
-                    <span class="game-name">${u.email}</span>
+                    <span class="game-name">${escapeHtml(u.email)}</span>
                     <div>
                         <button class="approve-btn" onclick="approveUser('${
                           u._id
@@ -781,8 +795,8 @@ function renderGames(games) {
       <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
         
         <div style="flex-shrink: 0; position: relative; width: 80px; height: 80px;">
-          <img src="${imgUrl}" 
-               alt="${game.name}" 
+          <img src="${escapeHtml(imgUrl)}" 
+               alt="${escapeHtml(game.name)}" 
                style="width: 100%; height: 100%; border-radius: 8px; object-fit: cover; background: #000;"
                onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
           
@@ -791,30 +805,34 @@ function renderGames(games) {
 
         <div style="flex: 1; min-width: 0;">
           <div class="card-header" style="margin-bottom: 5px;">
-            <span class="game-name" title="${
+            <span class="game-name" title="${escapeHtml(
               game.name
-            }" style="font-size: 1rem;">${game.name}</span>
+            )}" style="font-size: 1rem;">${escapeHtml(game.name)}</span>
           </div>
           
           <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted); align-items: center;">
             <span class="status-badge online">${sizeDisplay}</span>
             ${
               game.id
-                ? `<span class="status-badge" style="font-family: monospace; opacity: 0.7;">${game.id}</span>`
+                ? `<span class="status-badge" style="font-family: monospace; opacity: 0.7;">${escapeHtml(
+                    game.id
+                  )}</span>`
                 : ""
             }
           </div>
           
           <div style="margin-top: 10px; display: flex; gap: 10px;">
-            <button onclick="window.open('${
+            <button onclick="window.open('${escapeHtml(
               game.url
-            }', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
+            )}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
               📥 Download
             </button>
             ${
               game.id
                 ? `
-              <button onclick="window.open('${tinfoilUrl}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
+              <button onclick="window.open('${escapeHtml(
+                tinfoilUrl
+              )}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
                 🔗 Info
               </button>
             `

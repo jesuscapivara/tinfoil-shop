@@ -1,6 +1,10 @@
 import fetch from "node-fetch";
+import dotenv from "dotenv";
 
-const SHOP_URL = "https://tinfoilapp.discloud.app/api";
+dotenv.config();
+
+// ✅ Usa variável de ambiente em vez de hardcode
+const SHOP_URL = process.env.SHOP_URL || "https://tinfoilapp.discloud.app/api";
 
 // Cores para facilitar leitura
 const c = {

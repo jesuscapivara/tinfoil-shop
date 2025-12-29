@@ -41,9 +41,11 @@ if (isEmailConfigured) {
         user: EMAIL_USER,
         pass: EMAIL_PASS,
       },
-      // Para porta 587, usa STARTTLS
+      // ✅ TLS seguro: valida certificados (removido rejectUnauthorized: false)
+      // Se precisar aceitar certificados auto-assinados em desenvolvimento,
+      // configure apenas para ambiente local via variável de ambiente
       tls: {
-        rejectUnauthorized: false, // Aceita certificados auto-assinados se necessário
+        rejectUnauthorized: process.env.NODE_ENV !== "development", // Valida em produção, permite auto-assinados apenas em dev
       },
     });
     console.log(

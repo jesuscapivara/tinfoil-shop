@@ -4,6 +4,8 @@ import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import multer from "multer";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { loginView } from "./frontend/views/login.js";
 import { dashboardView } from "./frontend/views/dashboard.js";
 import { saveDownloadHistory, getDownloadHistory } from "./database.js";
@@ -39,6 +41,7 @@ const ROOT_GAMES_FOLDER = "/Games_Switch";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASS = process.env.ADMIN_PASS;
 const IS_PRODUCTION = !!process.env.DOMINIO;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Log inicial de config
 console.log("═══════════════════════════════════════════════");
@@ -95,8 +98,10 @@ const MAX_CONCURRENT_DOWNLOADS = 1; // ⚠️ LIMITE: Apenas 1 download por vez 
 })();
 
 // --- HELPERS ---
-const generateToken = (email, pass) =>
-  Buffer.from(`${email}:${pass}`).toString("base64");
+// ✅ Gera token JWT seguro (substitui Base64 vulnerável)
+const generateToken = (payload) => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "1d" });
+};
 
 const getCookieOptions = () => ({
   maxAge: 86400000,
@@ -106,7 +111,7 @@ const getCookieOptions = () => ({
   secure: IS_PRODUCTION,
 });
 
-// --- MIDDLEWARE AUTH (Simplificado) ---
+// --- MIDDLEWARE AUTH (JWT Seguro) ---
 const requireAuth = async (req, res, next) => {
   if (!ADMIN_EMAIL || !ADMIN_PASS) {
     return res
@@ -125,24 +130,27 @@ const requireAuth = async (req, res, next) => {
       // Ignora erro de decode
     }
 
-    // Verifica se é Admin Supremo (formato: admin:${ADMIN_PASS} em base64)
-    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
-    if (token === adminToken) {
-      return next();
-    }
-
-    // Verifica se é usuário comum (formato: user:${userId} em base64)
+    // ✅ Verifica token JWT
     try {
-      const decoded = Buffer.from(token, "base64").toString();
-      if (decoded.startsWith("user:")) {
-        const userId = decoded.split(":")[1];
-        const user = await User.findById(userId);
-        if (user) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // Se for admin
+      if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
+        req.user = decoded;
+        return next();
+      }
+
+      // Se for usuário comum
+      if (decoded.role === "user" && decoded.id) {
+        const user = await User.findById(decoded.id);
+        if (user && user.isApproved) {
+          req.user = decoded;
           return next();
         }
       }
-    } catch (e) {
-      // Se der erro, continua para redirecionar
+    } catch (err) {
+      // Token inválido ou expirado
+      console.log("[AUTH] Token inválido:", err.message);
     }
   }
 
@@ -198,23 +206,23 @@ router.get("/", async (req, res) => {
       // Ignora erro de decode
     }
 
-    // Verifica se é Admin Supremo
-    const adminToken = generateToken(ADMIN_EMAIL, ADMIN_PASS);
-    if (token === adminToken) {
-      return res.redirect("/admin");
-    }
+    // ✅ Verifica token JWT
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Verifica se é usuário comum (token formato: user:userId)
-    if (token.startsWith("user:")) {
-      try {
-        const userId = token.split(":")[1];
-        const user = await User.findById(userId);
-        if (user) {
+      // Se for admin ou usuário aprovado, redireciona
+      if (
+        (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) ||
+        (decoded.role === "user" && decoded.id)
+      ) {
+        const user =
+          decoded.role === "user" ? await User.findById(decoded.id) : null;
+        if (decoded.role === "admin" || (user && user.isApproved)) {
           return res.redirect("/admin");
         }
-      } catch (e) {
-        // Se der erro, vai para login
       }
+    } catch (err) {
+      // Token inválido, continua para login
     }
   }
 
@@ -236,24 +244,24 @@ router.get("/admin/login", async (req, res) => {
       // Ignora erro de decode
     }
 
-    // Verifica se é Admin Supremo (formato: admin:${ADMIN_PASS} em base64)
-    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
-    if (token === adminToken) {
-      return res.redirect("/admin");
-    }
-
-    // Verifica se é usuário comum (formato: user:${userId} em base64)
+    // ✅ Verifica token JWT
     try {
-      const decoded = Buffer.from(token, "base64").toString();
-      if (decoded.startsWith("user:")) {
-        const userId = decoded.split(":")[1];
-        const user = await User.findById(userId);
-        if (user) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // Se for admin
+      if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
+        return res.redirect("/admin");
+      }
+
+      // Se for usuário comum
+      if (decoded.role === "user" && decoded.id) {
+        const user = await User.findById(decoded.id);
+        if (user && user.isApproved) {
           return res.redirect("/admin");
         }
       }
-    } catch (e) {
-      // Se der erro ao decodificar, continua para mostrar login
+    } catch (err) {
+      // Token inválido, continua para mostrar login
     }
   }
 
@@ -265,7 +273,12 @@ router.post("/bridge/auth", async (req, res) => {
 
   // 1. Verifica se é o Admin Supremo (.env)
   if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
-    const token = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
+    // ✅ Gera token JWT seguro
+    const token = generateToken({
+      email: ADMIN_EMAIL,
+      role: "admin",
+      id: "admin",
+    });
     const cookieOptions = getCookieOptions();
     res.cookie("auth_token", token, cookieOptions);
     console.log(`[AUTH] ✅ Admin logado: ${email}`);
@@ -274,13 +287,21 @@ router.post("/bridge/auth", async (req, res) => {
 
   // 2. Verifica se é usuário normal (MongoDB)
   const user = await findUserByEmail(email);
-  if (user && user.password === password) {
-    // Token diferente para usuários normais
-    const token = Buffer.from(`user:${user._id}`).toString("base64");
-    const cookieOptions = getCookieOptions();
-    res.cookie("auth_token", token, cookieOptions);
-    console.log(`[AUTH] ✅ Usuário logado: ${email}`);
-    return res.json({ success: true, redirect: "/admin" });
+  if (user) {
+    // ✅ Compara senha com bcrypt
+    const validPass = await bcrypt.compare(password, user.password);
+    if (validPass) {
+      // ✅ Gera token JWT seguro
+      const token = generateToken({
+        id: user._id.toString(),
+        email: user.email,
+        role: "user",
+      });
+      const cookieOptions = getCookieOptions();
+      res.cookie("auth_token", token, cookieOptions);
+      console.log(`[AUTH] ✅ Usuário logado: ${email}`);
+      return res.json({ success: true, redirect: "/admin" });
+    }
   }
 
   console.log(`[AUTH] ❌ Login falhou para: ${email}`);
@@ -290,19 +311,11 @@ router.post("/bridge/auth", async (req, res) => {
 // ROTA PARA OBTER DADOS DO USUÁRIO (Para o Dashboard)
 // --- API: DADOS DO USUÁRIO LOGADO ---
 router.get("/bridge/me", requireAuth, async (req, res) => {
-  // Recupera usuário do cookie
-  const cookies = req.headers.cookie || "";
-  const token = cookies.match(/auth_token=([^;]+)/)?.[1];
-
-  if (!token) {
-    return res.status(401).json({ error: "No token" });
-  }
-
-  const decoded = Buffer.from(decodeURIComponent(token), "base64").toString();
+  // ✅ Usuário já está em req.user pelo middleware requireAuth
   const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
 
   // Se for Admin Supremo
-  if (decoded.startsWith("admin:")) {
+  if (req.user.role === "admin") {
     return res.json({
       email: ADMIN_EMAIL,
       isAdmin: true,
@@ -315,9 +328,8 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
   }
 
   // Se for Usuário Comum
-  const userId = decoded.split(":")[1];
   try {
-    const user = await User.findById(userId);
+    const user = await User.findById(req.user.id);
 
     if (user) {
       res.json({

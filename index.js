@@ -4,6 +4,7 @@ import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import jwt from "jsonwebtoken";
 import manaBridge from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
@@ -17,8 +18,12 @@ dotenv.config();
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASS = process.env.ADMIN_PASS;
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  process.env.ADMIN_PASS ||
+  "CHANGE_THIS_SECRET_IN_PRODUCTION"; // ⚠️ Use variável de ambiente segura
 
-// Função simples de autenticação para rotas /bridge/*
+// ✅ Função de autenticação JWT para rotas /bridge/*
 const requireAuth = async (req, res, next) => {
   const cookies = req.headers.cookie || "";
   const tokenMatch = cookies.match(/auth_token=([^;]+)/);
@@ -29,21 +34,27 @@ const requireAuth = async (req, res, next) => {
       token = decodeURIComponent(token);
     } catch (e) {}
 
-    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
-    if (token === adminToken) {
-      return next();
-    }
-
+    // ✅ Verifica token JWT
     try {
-      const decoded = Buffer.from(token, "base64").toString();
-      if (decoded.startsWith("user:")) {
-        const userId = decoded.split(":")[1];
-        const user = await User.findById(userId);
-        if (user) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // Se for admin
+      if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
+        req.user = decoded;
+        return next();
+      }
+
+      // Se for usuário comum
+      if (decoded.role === "user" && decoded.id) {
+        const user = await User.findById(decoded.id);
+        if (user && user.isApproved) {
+          req.user = decoded;
           return next();
         }
       }
-    } catch (e) {}
+    } catch (err) {
+      // Token inválido ou expirado
+    }
   }
 
   res.status(401).json({ error: "Não autorizado" });
