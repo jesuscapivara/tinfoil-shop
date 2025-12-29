@@ -325,7 +325,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
       isAdmin: true,
       isApproved: true,
       tinfoilUser: "admin",
-      tinfoilPass: "admin", // Admin não usa tinfoil, usa o .env se quiser
+      tinfoilPass: "*********", // Admin usa .env, ocultamos por padrão
       host: `${DOMAIN}/api`,
       protocol: "https",
     });
@@ -341,7 +341,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
         isAdmin: user.isAdmin,
         isApproved: user.isApproved,
         tinfoilUser: user.tinfoilUser,
-        tinfoilPass: user.tinfoilPass,
+        tinfoilPass: null, // ✅ Não enviamos o hash para o front!
         host: `${DOMAIN}/api`,
         protocol: "https",
       });
@@ -351,6 +351,38 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("[API] Erro ao buscar usuário:", e);
     res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// NOVA ROTA: REGENERAR CREDENCIAIS TINFOIL
+router.post("/bridge/regenerate-credentials", requireAuth, async (req, res) => {
+  // Apenas usuários comuns podem regenerar via banco. Admin usa .env.
+  if (req.user.role === "admin") {
+    return res.status(400).json({ error: "Admin deve alterar senha no .env" });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+    // Gera nova senha
+    const newPassPlain = Math.random().toString(36).slice(-6).toUpperCase();
+
+    // Hash
+    const salt = await bcrypt.genSalt(10);
+    const newPassHash = await bcrypt.hash(newPassPlain, salt);
+
+    // Salva no banco
+    user.tinfoilPass = newPassHash;
+    await user.save();
+
+    console.log(`[AUTH] 🔄 Credenciais regeneradas para: ${user.email}`);
+
+    // Retorna a senha PLAIN para o usuário ver (apenas agora)
+    res.json({ success: true, newPass: newPassPlain });
+  } catch (e) {
+    console.error("[AUTH] Erro ao regenerar:", e);
+    res.status(500).json({ error: "Erro ao regenerar credenciais" });
   }
 });
 

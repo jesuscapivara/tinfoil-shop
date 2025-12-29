@@ -576,19 +576,22 @@ async function loadUser() {
                     </div>
                     <div class="cred-item">
                         <label>Host</label>
-                        <code>${user.host}</code>
+                        <code>${escapeHtml(user.host)}</code>
                     </div>
                     <div class="cred-item">
                         <label>Username</label>
-                        <code>${user.tinfoilUser}</code>
+                        <code>${escapeHtml(user.tinfoilUser)}</code>
                     </div>
                     <div class="cred-item">
                         <label>Password</label>
-                        <code>${user.tinfoilPass}</code>
+                        <code id="tinfoil-pass-display" style="color: var(--warning); letter-spacing: 2px;">••••••</code>
                     </div>
                 </div>
-                <div class="cred-footer">
-                    Configure isso na aba "File Browser" do seu Switch.
+                <div class="cred-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                    <span>Configure isso na aba "File Browser" do Switch.</span>
+                    <button onclick="regenerateCreds()" style="background: transparent; border: 1px solid var(--text-muted); padding: 6px 12px; font-size: 0.75rem; cursor: pointer; border-radius: 4px; color: var(--text);">
+                        🔄 Gerar Nova Senha
+                    </button>
                 </div>
             `;
     } else {
@@ -863,6 +866,58 @@ function filterGames() {
   );
 
   renderGames(filtered);
+}
+
+// ═══════════════════════════════════════════════
+// REGENERAR CREDENCIAIS TINFOIL
+// ═══════════════════════════════════════════════
+
+async function regenerateCreds() {
+  if (
+    !confirm(
+      "⚠️ ATENÇÃO: Isso vai invalidar sua senha atual no Switch.\n\nO servidor vai gerar uma nova senha aleatória e te mostrar UMA VEZ.\n\nDeseja continuar?"
+    )
+  ) {
+    return;
+  }
+
+  const btn = event.target;
+  const originalText = btn.innerText;
+  btn.disabled = true;
+  btn.innerText = "Gerando...";
+
+  try {
+    const res = await fetch("/bridge/regenerate-credentials", {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+      const codeEl = document.getElementById("tinfoil-pass-display");
+      codeEl.innerText = data.newPass;
+      codeEl.style.color = "var(--success)";
+      codeEl.style.letterSpacing = "normal";
+
+      showNotification("✅ Nova senha gerada! Copie agora.", "success");
+      btn.innerText = "Senha Gerada!";
+
+      // Alerta visual extra
+      alert(
+        `Sua nova senha é: ${data.newPass}\n\nCopie e atualize no Switch agora. Ela não será mostrada novamente.`
+      );
+    } else {
+      showNotification(data.error || "Erro ao gerar senha", "error");
+      btn.innerText = originalText;
+      btn.disabled = false;
+    }
+  } catch (e) {
+    console.error(e);
+    showNotification("Erro de conexão", "error");
+    btn.innerText = originalText;
+    btn.disabled = false;
+  }
 }
 
 // ═══════════════════════════════════════════════
