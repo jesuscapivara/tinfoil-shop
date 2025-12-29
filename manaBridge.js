@@ -168,6 +168,43 @@ router.post("/bridge/register", async (req, res) => {
   }
 });
 
+// --- ROTA RAIZ: REDIRECIONAMENTO INTELIGENTE ---
+router.get("/", async (req, res) => {
+  const cookies = req.headers.cookie || "";
+  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
+  let token = tokenMatch ? tokenMatch[1] : null;
+
+  if (token) {
+    try {
+      token = decodeURIComponent(token);
+    } catch (e) {
+      // Ignora erro de decode
+    }
+
+    // Verifica se é Admin Supremo
+    const adminToken = generateToken(ADMIN_EMAIL, ADMIN_PASS);
+    if (token === adminToken) {
+      return res.redirect("/admin");
+    }
+
+    // Verifica se é usuário comum (token formato: user:userId)
+    if (token.startsWith("user:")) {
+      try {
+        const userId = token.split(":")[1];
+        const user = await User.findById(userId);
+        if (user) {
+          return res.redirect("/admin");
+        }
+      } catch (e) {
+        // Se der erro, vai para login
+      }
+    }
+  }
+
+  // Se não tem token válido, vai para login
+  res.redirect("/admin/login");
+});
+
 // --- ROTAS DE AUTENTICAÇÃO ---
 router.get("/admin/login", (req, res) => {
   const cookies = req.headers.cookie || "";
