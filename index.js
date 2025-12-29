@@ -132,17 +132,33 @@ async function getDirectLink(path) {
 
 // 🔍 EXTRAÇÃO DE TITLE ID MELHORADA
 function parseGameInfo(fileName) {
-  // Tenta achar ID hexadecimal de 16 caracteres entre colchetes [0100...]
-  const idMatch = fileName.match(/\[([0-9A-Fa-f]{16})\]/);
-  const titleId = idMatch ? idMatch[1].toUpperCase() : null;
+  // Tenta achar o primeiro ID hexadecimal de 16 caracteres entre colchetes [0100...]
+  // Exemplo: "Hollow Knight Silksong [010013C00E930800][v589824].nsz"
+  // Deve pegar: 010013C00E930800 (o primeiro Title ID, não a versão)
+
+  // Busca todos os matches de [16 caracteres hex]
+  const regex = /\[([0-9A-Fa-f]{16})\]/g;
+  let titleId = null;
+  let match;
+
+  // Pega o primeiro match (Title ID geralmente vem antes da versão)
+  while ((match = regex.exec(fileName)) !== null) {
+    const potentialId = match[1].toUpperCase();
+    // Title IDs são sempre exatamente 16 caracteres hexadecimais
+    if (potentialId.length === 16) {
+      titleId = potentialId;
+      break; // Pega o primeiro Title ID encontrado
+    }
+  }
 
   // Limpa o nome removendo [ID], (Size), v0, etc
   let cleanName = fileName
     .replace(/\.(nsp|nsz|xci)$/i, "") // Remove extensão
-    .replace(/\[([0-9A-Fa-f]{16})\]/g, "") // Remove ID
+    .replace(/\[([0-9A-Fa-f]{16})\]/g, "") // Remove todos os IDs
     .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "") // Remove tamanho
-    .replace(/\[v[0-9]+\]/gi, "") // Remove versão [v0]
-    .replace(/\s+$/, ""); // Remove espaços finais
+    .replace(/\[v[0-9]+\]/gi, "") // Remove versão [v589824]
+    .replace(/\s+/g, " ") // Normaliza espaços múltiplos
+    .trim(); // Remove espaços finais
 
   return { name: cleanName, id: titleId };
 }

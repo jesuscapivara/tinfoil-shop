@@ -1560,10 +1560,10 @@ export function dashboardTemplate() {
                 const sizeMB = (game.size / 1024 / 1024).toFixed(2);
                 const sizeDisplay = game.size > 1024 * 1024 * 1024 ? \`\${sizeGB} GB\` : \`\${sizeMB} MB\`;
                 
-                // 🖼️ URL da Imagem Mágica
+                // 🖼️ URL da Imagem Mágica (formato correto do Tinfoil)
                 // Se tiver ID, usa o tinfoil.media. Se não, usa uma imagem padrão.
                 const imgUrl = game.id 
-                    ? \`https://tinfoil.media/title/\${game.id}/0/icon.jpg\` 
+                    ? \`https://tinfoil.media/ti/\${game.id}/256/256/\` 
                     : 'https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg';
                 
                 // Link para a página do Tinfoil (como você pediu)
