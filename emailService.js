@@ -10,35 +10,57 @@ dotenv.config();
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
-const SMTP_PORT = parseInt(process.env.SMTP_PORT) || 587;
+
+// Suporta tanto EMAIL_USER/EMAIL_PASS quanto SMTP_USER/SMTP_PASS
+const EMAIL_USER = process.env.EMAIL_USER || process.env.SMTP_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS || process.env.SMTP_PASS;
+
+// KingHost SMTPi (SMTP Internacional) - Recomendado para uso fora do Brasil
+// Se não especificado, usa SMTPi da KingHost
+const USE_SMTPI = process.env.USE_SMTPI !== "false"; // Por padrão usa SMTPi
+const SMTP_HOST =
+  process.env.SMTP_HOST ||
+  (USE_SMTPI ? "smtpi.kinghost.net" : "smtp.kinghost.net");
+const SMTP_PORT = parseInt(process.env.SMTP_PORT) || 587; // Porta padrão KingHost: 587 (sem SSL) ou 465 (com SSL)
 
 // Verifica se as credenciais SMTP estão configuradas
-const isEmailConfigured = SMTP_USER && SMTP_PASS;
+const isEmailConfigured = EMAIL_USER && EMAIL_PASS;
 
 // Configura o transportador apenas se as credenciais existirem
 let transporter = null;
 if (isEmailConfigured) {
   try {
+    // Para KingHost: porta 587 = sem SSL, porta 465 = com SSL/TLS
+    const secure = SMTP_PORT === 465;
+
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
-      secure: false, // true para 465, false para outras portas
+      secure: secure, // true para 465 (SSL/TLS), false para 587 (STARTTLS)
       auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS,
+        user: EMAIL_USER,
+        pass: EMAIL_PASS,
+      },
+      // Para porta 587, usa STARTTLS
+      tls: {
+        rejectUnauthorized: false, // Aceita certificados auto-assinados se necessário
       },
     });
-    console.log("[EMAIL] ✅ Serviço de e-mail configurado");
+    console.log(
+      `[EMAIL] ✅ Serviço de e-mail configurado (${SMTP_HOST}:${SMTP_PORT}, ${
+        secure ? "SSL/TLS" : "STARTTLS"
+      })`
+    );
+    if (USE_SMTPI) {
+      console.log(`[EMAIL] ℹ️ Usando SMTPi (SMTP Internacional) da KingHost`);
+    }
   } catch (e) {
     console.error("[EMAIL] ❌ Erro ao configurar transporter:", e.message);
   }
 } else {
   console.log("[EMAIL] ⚠️ SMTP não configurado. E-mails não serão enviados.");
   console.log(
-    "[EMAIL] ⚠️ Configure SMTP_USER e SMTP_PASS no .env para habilitar."
+    "[EMAIL] ⚠️ Configure EMAIL_USER e EMAIL_PASS (ou SMTP_USER e SMTP_PASS) no .env para habilitar."
   );
 }
 
@@ -52,7 +74,7 @@ export async function sendNewUserAlert(newUserEmail) {
 
   try {
     await transporter.sendMail({
-      from: `"Mana Shop" <${SMTP_USER}>`,
+      from: EMAIL_USER,
       to: ADMIN_EMAIL,
       subject: "🔔 Novo Usuário Aguardando Aprovação",
       html: `
@@ -80,7 +102,7 @@ export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
 
   try {
     await transporter.sendMail({
-      from: `"Mana Shop" <${SMTP_USER}>`,
+      from: EMAIL_USER,
       to: userEmail,
       subject: "✅ Seu acesso foi APROVADO!",
       html: `
