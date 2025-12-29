@@ -52,6 +52,29 @@ async function cancelDownload(id) {
   }
 }
 
+async function removeDownload(id) {
+  try {
+    const res = await fetch(`/bridge/cancel/${id}`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    if (res.status === 401) return (window.location.href = "/admin/login");
+
+    const data = await res.json();
+
+    if (res.ok) {
+      showNotification(data.message || "Download removido", "info");
+      loadStatus();
+    } else {
+      showNotification(data.error || "Erro ao remover", "error");
+    }
+  } catch (e) {
+    console.error(e);
+    showNotification("Erro ao remover download", "error");
+  }
+}
+
 function switchInputTab(tab) {
   document
     .querySelectorAll(".tabs .tab")
@@ -435,7 +458,14 @@ function buildActiveCard(item) {
             
             ${
               isError
-                ? `<div class="error-msg">❌ ${escapeHtml(item.error)}</div>`
+                ? `
+                <div class="error-msg">❌ ${escapeHtml(item.error)}</div>
+                <button class="remove-btn" onclick="removeDownload('${
+                  item.id
+                }')" title="Remover da lista">
+                    🗑️ Remover
+                </button>
+                `
                 : ""
             }
         </div>

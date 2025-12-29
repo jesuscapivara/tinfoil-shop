@@ -560,12 +560,24 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             activeDownloads[id].phase = "error";
             activeDownloads[id].error = `Duplicado! ${reason}`;
             activeDownloads[id].name = file.name; // Atualiza nome para ficar claro quem falhou
+            activeDownloads[id].errorTimestamp = Date.now(); // Marca quando o erro ocorreu
 
             // Destrói o torrent imediatamente para não baixar nada
             torrent.destroy();
 
-            // Remove da lista ativa após 5s
-            setTimeout(() => onDownloadComplete(id), 5000);
+            // Remove da lista ativa após 1 minuto (auto-remoção)
+            setTimeout(() => {
+              if (
+                activeDownloads[id] &&
+                activeDownloads[id].phase === "error"
+              ) {
+                log(
+                  `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+                  "CLEANUP"
+                );
+                onDownloadComplete(id);
+              }
+            }, 60000); // 1 minuto = 60000ms
             return; // 🛑 PARA TUDO AQUI
           }
         }
@@ -590,9 +602,18 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           activeDownloads[id].phase = "error";
           activeDownloads[id].error =
             "Nenhum jogo Switch encontrado no torrent";
+          activeDownloads[id].errorTimestamp = Date.now();
           torrent.destroy();
-          // Processa próximo da fila após erro
-          setTimeout(() => onDownloadComplete(id), 5000);
+          // Auto-remoção após 1 minuto
+          setTimeout(() => {
+            if (activeDownloads[id] && activeDownloads[id].phase === "error") {
+              log(
+                `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+                "CLEANUP"
+              );
+              onDownloadComplete(id);
+            }
+          }, 60000);
           return;
         }
 
@@ -832,9 +853,21 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             if (activeDownloads[id]) {
               activeDownloads[id].error = err.message;
               activeDownloads[id].phase = "error";
+              activeDownloads[id].errorTimestamp = Date.now();
             }
-            // Processa próximo da fila após erro
-            setTimeout(() => onDownloadComplete(id), 5000);
+            // Auto-remoção após 1 minuto
+            setTimeout(() => {
+              if (
+                activeDownloads[id] &&
+                activeDownloads[id].phase === "error"
+              ) {
+                log(
+                  `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+                  "CLEANUP"
+                );
+                onDownloadComplete(id);
+              }
+            }, 60000);
           } finally {
             torrent.destroy();
             log(`🗑️ Torrent destruído e recursos liberados`, "TORRENT");
@@ -845,8 +878,17 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           log(`❌ ERRO NO TORRENT: ${err.message}`, "ERROR");
           activeDownloads[id].error = err.message;
           activeDownloads[id].phase = "error";
-          // Processa próximo da fila após erro
-          setTimeout(() => onDownloadComplete(id), 5000);
+          activeDownloads[id].errorTimestamp = Date.now();
+          // Auto-remoção após 1 minuto
+          setTimeout(() => {
+            if (activeDownloads[id] && activeDownloads[id].phase === "error") {
+              log(
+                `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+                "CLEANUP"
+              );
+              onDownloadComplete(id);
+            }
+          }, 60000);
         });
 
         torrent.on("warning", (warn) => {
@@ -858,8 +900,17 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
     log(`❌ ERRO ao adicionar torrent: ${err.message}`, "ERROR");
     activeDownloads[id].error = err.message;
     activeDownloads[id].phase = "error";
-    // Processa próximo da fila após erro
-    setTimeout(() => onDownloadComplete(id), 5000);
+    activeDownloads[id].errorTimestamp = Date.now();
+    // Auto-remoção após 1 minuto
+    setTimeout(() => {
+      if (activeDownloads[id] && activeDownloads[id].phase === "error") {
+        log(
+          `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+          "CLEANUP"
+        );
+        onDownloadComplete(id);
+      }
+    }, 60000);
   }
 
   // Timeout de 5 minutos
@@ -868,8 +919,17 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       log(`⏰ TIMEOUT: Nenhum peer encontrado após 5 minutos`, "ERROR");
       activeDownloads[id].error = "Timeout: Nenhum peer encontrado";
       activeDownloads[id].phase = "error";
-      // Processa próximo da fila após timeout
-      setTimeout(() => onDownloadComplete(id), 5000);
+      activeDownloads[id].errorTimestamp = Date.now();
+      // Auto-remoção após 1 minuto
+      setTimeout(() => {
+        if (activeDownloads[id] && activeDownloads[id].phase === "error") {
+          log(
+            `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+            "CLEANUP"
+          );
+          onDownloadComplete(id);
+        }
+      }, 60000);
     }
   }, 300000);
 }
