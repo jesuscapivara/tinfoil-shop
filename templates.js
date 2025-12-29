@@ -349,27 +349,6 @@ export function dashboardTemplate() {
             opacity: 0.85;
         }
         
-        /* Badges sobre a imagem */
-        .type-badge {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            font-size: 0.65rem;
-            font-weight: 800;
-            padding: 2px 6px;
-            border-top-left-radius: 6px;
-            border-bottom-right-radius: 6px;
-            color: white;
-            box-shadow: -2px -2px 5px rgba(0,0,0,0.5);
-            z-index: 10;
-        }
-        .badge-upd {
-            background: linear-gradient(135deg, #f59e0b, #d97706); /* Laranja */
-        }
-        .badge-dlc {
-            background: linear-gradient(135deg, #a855f7, #7e22ce); /* Roxo */
-        }
-        
         /* Index Status Box */
         .index-status {
             background: var(--card);
@@ -1567,7 +1546,7 @@ export function dashboardTemplate() {
             }
         }
         
-        // Função para renderizar jogos (ATUALIZADA COM LÓGICA DE BASE ID)
+        // Função para renderizar jogos (ATUALIZADA)
         function renderGames(games) {
             const list = document.getElementById('games-list');
             
@@ -1581,43 +1560,35 @@ export function dashboardTemplate() {
                 const sizeMB = (game.size / 1024 / 1024).toFixed(2);
                 const sizeDisplay = game.size > 1024 * 1024 * 1024 ? \`\${sizeGB} GB\` : \`\${sizeMB} MB\`;
                 
-                let imgUrl = 'https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg';
-                let badgeHtml = '';
-                let tinfoilUrl = '#';
-
+                // 🖼️ URL da Imagem Mágica (formato correto do Tinfoil)
+                // Se tiver ID, usa o tinfoil.media. Se não, usa uma imagem padrão.
+                const imgUrl = game.id 
+                    ? \`https://tinfoil.media/ti/\${game.id}/256/256/\` 
+                    : 'https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg';
+                
+                // Link para a página do Tinfoil
+                const tinfoilUrl = game.id 
+                    ? \`https://tinfoil.io/Title/\${game.id}\` 
+                    : '#';
+                
+                // Debug: log no console
                 if (game.id) {
-                    // 🧠 A MÁGICA DOS IDS NINTENDO
-                    // Pega os últimos 3 caracteres
-                    const suffix = game.id.slice(-3).toUpperCase();
-                    
-                    // Calcula o BaseID (Zera os últimos 3 dígitos para achar a capa do jogo original)
-                    const baseId = game.id.substring(0, 13) + '000';
-                    
-                    // Define a URL da imagem usando o BaseID
-                    imgUrl = \`https://tinfoil.media/ti/\${baseId}/256/256/\`;
-                    tinfoilUrl = \`https://tinfoil.io/Title/\${baseId}\`;
-
-                    // Lógica do Badge (Selo)
-                    if (suffix === '800') {
-                        // UPDATE (Geralmente termina em 800)
-                        badgeHtml = \`<span class="type-badge badge-upd">UPDATE</span>\`;
-                    } else if (suffix !== '000') {
-                        // DLC (Termina em qualquer coisa que não seja 000 ou 800)
-                        badgeHtml = \`<span class="type-badge badge-dlc">DLC</span>\`;
-                    }
-                    // Se for '000', é o jogo base, não precisa de selo.
+                    console.log(\`[GAME] \${game.name} - ID: \${game.id} - URL: \${imgUrl}\`);
                 }
 
                 return \`
                     <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
-                        
-                        <div style="flex-shrink: 0; position: relative; width: 80px; height: 80px;">
-                            <img src="\${imgUrl}" 
-                                 alt="\${game.name}" 
-                                 style="width: 100%; height: 100%; border-radius: 8px; object-fit: cover; background: #000;"
-                                 onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
-                            
-                            \${badgeHtml}
+                        <div style="flex-shrink: 0;">
+                            \${game.id ? \`
+                                <div style="width: 80px; height: 80px; border-radius: 8px; background: #000; background-image: url(\${imgUrl}); background-size: cover; background-position: center; background-repeat: no-repeat;" 
+                                     title="\${game.name}">
+                                </div>
+                            \` : \`
+                                <img src="\${imgUrl}" 
+                                     alt="\${game.name}" 
+                                     style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; background: #000;"
+                                     onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
+                            \`}
                         </div>
 
                         <div style="flex: 1; min-width: 0;">
@@ -1625,18 +1596,18 @@ export function dashboardTemplate() {
                                 <span class="game-name" title="\${game.name}" style="font-size: 1rem;">\${game.name}</span>
                             </div>
                             
-                            <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted); align-items: center;">
+                            <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted);">
                                 <span class="status-badge online">\${sizeDisplay}</span>
-                                \${game.id ? \`<span class="status-badge" style="font-family: monospace; opacity: 0.7;">\${game.id}</span>\` : ''}
+                                \${game.id ? \`<span class="status-badge" style="background: rgba(99, 102, 241, 0.1); color: var(--primary);">\${game.id}</span>\` : ''}
                             </div>
                             
                             <div style="margin-top: 10px; display: flex; gap: 10px;">
                                 <button onclick="window.open('\${game.url}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
-                                    📥 Download
+                                    📥 Download Direto
                                 </button>
                                 \${game.id ? \`
                                     <button onclick="window.open('\${tinfoilUrl}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
-                                        🔗 Info
+                                        🔗 Ver no Tinfoil.io
                                     </button>
                                 \` : ''}
                             </div>
