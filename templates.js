@@ -144,9 +144,8 @@ export function loginTemplate() {
                 const data = await res.json();
                 
                 if (res.ok && data.success) {
-                    setTimeout(() => {
-                        window.location.href = data.redirect || '/admin';
-                    }, 100);
+                    // Redireciona imediatamente
+                    window.location.href = data.redirect || '/admin';
                 } else {
                     errorDiv.innerText = data.error || 'Acesso Negado';
                     errorDiv.classList.add('show');

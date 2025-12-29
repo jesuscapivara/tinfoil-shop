@@ -106,7 +106,7 @@ const getCookieOptions = () => ({
 });
 
 // --- MIDDLEWARE AUTH (Simplificado) ---
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   if (!ADMIN_EMAIL || !ADMIN_PASS) {
     return res
       .status(500)
@@ -120,16 +120,32 @@ const requireAuth = (req, res, next) => {
   if (token) {
     try {
       token = decodeURIComponent(token);
-    } catch (e) {}
+    } catch (e) {
+      // Ignora erro de decode
+    }
+
+    // Verifica se é Admin Supremo (formato: admin:${ADMIN_PASS} em base64)
+    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
+    if (token === adminToken) {
+      return next();
+    }
+
+    // Verifica se é usuário comum (formato: user:${userId} em base64)
+    try {
+      const decoded = Buffer.from(token, "base64").toString();
+      if (decoded.startsWith("user:")) {
+        const userId = decoded.split(":")[1];
+        const user = await User.findById(userId);
+        if (user) {
+          return next();
+        }
+      }
+    } catch (e) {
+      // Se der erro, continua para redirecionar
+    }
   }
 
-  const validToken = generateToken(ADMIN_EMAIL, ADMIN_PASS);
-
-  if (token === validToken) {
-    next();
-  } else {
-    res.redirect("/admin/login");
-  }
+  res.redirect("/admin/login");
 };
 
 // ROTA DE REGISTRO (Nova)
@@ -206,12 +222,40 @@ router.get("/", async (req, res) => {
 });
 
 // --- ROTAS DE AUTENTICAÇÃO ---
-router.get("/admin/login", (req, res) => {
+router.get("/admin/login", async (req, res) => {
   const cookies = req.headers.cookie || "";
-  const token = cookies.match(/auth_token=([^;]+)/)?.[1];
-  if (token === generateToken(ADMIN_EMAIL, ADMIN_PASS)) {
-    return res.redirect("/admin");
+  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
+  let token = tokenMatch ? tokenMatch[1] : null;
+
+  if (token) {
+    try {
+      // Decodifica URL encoding se houver
+      token = decodeURIComponent(token);
+    } catch (e) {
+      // Ignora erro de decode
+    }
+
+    // Verifica se é Admin Supremo (formato: admin:${ADMIN_PASS} em base64)
+    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
+    if (token === adminToken) {
+      return res.redirect("/admin");
+    }
+
+    // Verifica se é usuário comum (formato: user:${userId} em base64)
+    try {
+      const decoded = Buffer.from(token, "base64").toString();
+      if (decoded.startsWith("user:")) {
+        const userId = decoded.split(":")[1];
+        const user = await User.findById(userId);
+        if (user) {
+          return res.redirect("/admin");
+        }
+      }
+    } catch (e) {
+      // Se der erro ao decodificar, continua para mostrar login
+    }
   }
+
   res.send(loginTemplate());
 });
 
@@ -221,7 +265,9 @@ router.post("/bridge/auth", async (req, res) => {
   // 1. Verifica se é o Admin Supremo (.env)
   if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
     const token = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
-    res.cookie("auth_token", token, getCookieOptions());
+    const cookieOptions = getCookieOptions();
+    res.cookie("auth_token", token, cookieOptions);
+    console.log(`[AUTH] ✅ Admin logado: ${email}`);
     return res.json({ success: true, redirect: "/admin" });
   }
 
@@ -230,10 +276,13 @@ router.post("/bridge/auth", async (req, res) => {
   if (user && user.password === password) {
     // Token diferente para usuários normais
     const token = Buffer.from(`user:${user._id}`).toString("base64");
-    res.cookie("auth_token", token, getCookieOptions());
+    const cookieOptions = getCookieOptions();
+    res.cookie("auth_token", token, cookieOptions);
+    console.log(`[AUTH] ✅ Usuário logado: ${email}`);
     return res.json({ success: true, redirect: "/admin" });
   }
 
+  console.log(`[AUTH] ❌ Login falhou para: ${email}`);
   res.status(401).json({ error: "Credenciais inválidas" });
 });
 
