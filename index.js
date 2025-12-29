@@ -104,45 +104,38 @@ async function getDirectLink(path) {
   }
 }
 
-// 🔍 EXTRAÇÃO DE TITLE ID E VERSÃO (Melhorada)
+// 🔍 EXTRAÇÃO DE TITLE ID E VERSÃO (CRÍTICO PARA TINFOIL)
 function parseGameInfo(fileName) {
-  // Busca todos os matches de [16 caracteres hex]
-  const regexId = /\[([0-9A-Fa-f]{16})\]/g;
+  // 1. Extrai Title ID: Procura por [16 caracteres hexadecimais]
+  const regexId = /\[([0-9A-Fa-f]{16})\]/i;
   let titleId = null;
-  let match;
-  const matches = [];
+  const matchId = fileName.match(regexId);
 
-  // Coleta todos os matches primeiro
-  while ((match = regexId.exec(fileName)) !== null) {
-    matches.push(match[1].toUpperCase());
+  if (matchId) {
+    titleId = matchId[1].toUpperCase();
   }
 
-  // Pega o primeiro match (Title ID geralmente vem antes da versão)
-  // Title IDs são sempre exatamente 16 caracteres hexadecimais
-  if (matches.length > 0) {
-    titleId = matches[0]; // Primeiro match é sempre o Title ID
+  // 2. Extrai Versão: Procura por [v12345] ou (v12345)
+  // Essencial para a aba "New Games" funcionar
+  const regexVersion = /[\[\(]v(\d+)[\]\)]/i;
+  let version = 0; // Se não achar, assume 0 (Base Game)
+  const matchVersion = fileName.match(regexVersion);
+
+  if (matchVersion) {
+    version = parseInt(matchVersion[1], 10);
   }
 
-  // --- LÓGICA DE VERSÃO ADICIONADA ---
-  // Captura [v12345] antes de remover do nome
-  // O Tinfoil precisa desse número inteiro para ordenar em "New Games" / "Updates"
-  let version = 0; // Default: 0 assume Base Game
-  const versionMatch = fileName.match(/\[v(\d+)\]/i);
-  if (versionMatch) {
-    version = parseInt(versionMatch[1], 10);
-  }
-  // ----------------------------------
-
-  // Limpa o nome removendo [ID], (Size), v0, etc
+  // 3. Limpa o nome visualmente
   let cleanName = fileName
-    .replace(/\.(nsp|nsz|xci)$/i, "") // Remove extensão
-    .replace(/\[([0-9A-Fa-f]{16})\]/g, "") // Remove todos os IDs
-    .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "") // Remove tamanho
-    .replace(/\[v[0-9]+\]/gi, "") // Remove a tag de versão visualmente
-    .replace(/\s+/g, " ") // Normaliza espaços múltiplos
-    .trim(); // Remove espaços finais
+    .replace(/\.(nsp|nsz|xci)$/i, "")
+    .replace(regexId, "")
+    .replace(regexVersion, "")
+    .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
+    .replace(/\[\s*\]/g, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  // Retorna também a versão
   return { name: cleanName, id: titleId, version };
 }
 
@@ -173,26 +166,25 @@ async function buildGameIndex() {
     );
     log.info(`📁 Encontrados ${validFiles.length} arquivos.`);
 
-    indexingProgress = "Gerando Links...";
+    indexingProgress = "Gerando Links e Metadados...";
     const games = await processInBatches(validFiles, 10, async (file) => {
       const directUrl = await getDirectLink(file.path_lower);
       if (!directUrl) return null;
 
-      // Desestrutura a versão também
+      // Extrai metadados do nome original do arquivo
       const { name, id, version } = parseGameInfo(file.name);
 
-      // Log para debug (reduzido para não poluir)
-      // if (id) {
-      //   log.info(`🎮 Jogo: ${name} | ID: ${id} | v${version}`);
-      // }
-
-      // Retorna objeto formatado para Tinfoil
+      // ⚠️ O PULO DO GATO BLINDADO:
+      // Enviamos 'id', 'titleId' (redundância) e 'filename' original
+      // Isso impede que o Tinfoil tente ler a URL "estragada" do Dropbox
       return {
         url: directUrl,
-        size: file.size, // Size em bytes (obrigatório para barra de progresso correta)
+        size: file.size,
         name: name,
-        id: id,
-        version: version, // ✅ CRÍTICO: Tinfoil usa isso para popular "New Games"
+        id: id, // Padrão
+        titleId: id, // Redundância (algumas versões do Tinfoil preferem esse)
+        version: version, // Para "New Games"
+        filename: file.name, // Força o Tinfoil a usar este nome, não o da URL
       };
     });
 
