@@ -186,6 +186,7 @@ const gameCacheSchema = new mongoose.Schema({
   url: { type: String, required: true },
   size: { type: Number },
   name: { type: String, required: true },
+  id: { type: String }, // Title ID do jogo
   path: { type: String },
   indexedAt: { type: Date, default: Date.now },
 });
@@ -253,6 +254,7 @@ export async function saveGameCache(games) {
           url: g.url,
           size: g.size,
           name: g.name,
+          id: g.id || null, // ✅ Salva o Title ID
           path: g.path || "",
           indexedAt: new Date(),
         }))
@@ -286,6 +288,7 @@ export async function getGameCache() {
         url: g.url,
         size: g.size,
         name: g.name,
+        id: g.id || null, // ✅ Recupera o Title ID
       })),
       lastUpdate: meta?.value ? new Date(meta.value).getTime() : null,
     };

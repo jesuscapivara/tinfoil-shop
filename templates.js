@@ -1566,18 +1566,29 @@ export function dashboardTemplate() {
                     ? \`https://tinfoil.media/ti/\${game.id}/256/256/\` 
                     : 'https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg';
                 
-                // Link para a página do Tinfoil (como você pediu)
+                // Link para a página do Tinfoil
                 const tinfoilUrl = game.id 
                     ? \`https://tinfoil.io/Title/\${game.id}\` 
                     : '#';
+                
+                // Debug: log no console
+                if (game.id) {
+                    console.log(\`[GAME] \${game.name} - ID: \${game.id} - URL: \${imgUrl}\`);
+                }
 
                 return \`
                     <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
                         <div style="flex-shrink: 0;">
-                            <img src="\${imgUrl}" 
-                                 alt="\${game.name}" 
-                                 style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; background: #000;"
-                                 onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
+                            \${game.id ? \`
+                                <div style="width: 80px; height: 80px; border-radius: 8px; background: #000; background-image: url(\${imgUrl}); background-size: cover; background-position: center; background-repeat: no-repeat;" 
+                                     title="\${game.name}">
+                                </div>
+                            \` : \`
+                                <img src="\${imgUrl}" 
+                                     alt="\${game.name}" 
+                                     style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; background: #000;"
+                                     onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
+                            \`}
                         </div>
 
                         <div style="flex: 1; min-width: 0;">

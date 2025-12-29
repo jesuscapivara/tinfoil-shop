@@ -140,15 +140,17 @@ function parseGameInfo(fileName) {
   const regex = /\[([0-9A-Fa-f]{16})\]/g;
   let titleId = null;
   let match;
+  const matches = [];
+
+  // Coleta todos os matches primeiro
+  while ((match = regex.exec(fileName)) !== null) {
+    matches.push(match[1].toUpperCase());
+  }
 
   // Pega o primeiro match (Title ID geralmente vem antes da versão)
-  while ((match = regex.exec(fileName)) !== null) {
-    const potentialId = match[1].toUpperCase();
-    // Title IDs são sempre exatamente 16 caracteres hexadecimais
-    if (potentialId.length === 16) {
-      titleId = potentialId;
-      break; // Pega o primeiro Title ID encontrado
-    }
+  // Title IDs são sempre exatamente 16 caracteres hexadecimais
+  if (matches.length > 0) {
+    titleId = matches[0]; // Primeiro match é sempre o Title ID
   }
 
   // Limpa o nome removendo [ID], (Size), v0, etc
@@ -196,6 +198,11 @@ async function buildGameIndex() {
       if (!directUrl) return null;
 
       const { name, id } = parseGameInfo(file.name);
+
+      // Log para debug
+      if (id) {
+        log.info(`🎮 Jogo: ${name} | ID: ${id}`);
+      }
 
       // Retorna objeto formatado para Tinfoil
       return {
