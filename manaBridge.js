@@ -1360,6 +1360,110 @@ function onDownloadComplete(id) {
   }, 2000);
 }
 
+// --- ROTA DE PRÉ-VISUALIZAÇÃO ---
+router.post("/bridge/preview", requireAuth, async (req, res) => {
+  const { magnet, torrentFile } = req.body;
+
+  if (!magnet && !torrentFile) {
+    return res
+      .status(400)
+      .json({ error: "Magnet link ou arquivo .torrent necessário" });
+  }
+
+  const torrentInput =
+    magnet || (torrentFile ? Buffer.from(torrentFile, "base64") : null);
+
+  return new Promise((resolve) => {
+    let previewTorrent = null;
+    let timeoutId = null;
+
+    // Timeout de segurança (15 segundos)
+    timeoutId = setTimeout(() => {
+      if (previewTorrent) {
+        try {
+          previewTorrent.destroy();
+          client.remove(previewTorrent);
+        } catch (e) {
+          // Ignora erros ao remover
+        }
+      }
+      if (!res.headersSent) {
+        resolve(
+          res
+            .status(408)
+            .json({ error: "Timeout ao obter informações do torrent" })
+        );
+      }
+    }, 15000);
+
+    try {
+      previewTorrent = client.add(torrentInput, { path: "/tmp" }, (torrent) => {
+        clearTimeout(timeoutId);
+
+        // Extrai informações do torrent
+        const gameFiles = torrent.files.filter((f) =>
+          f.name.match(/\.(nsp|nsz|xci)$/i)
+        );
+        const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
+
+        const info = {
+          name: torrent.name,
+          infoHash: torrent.infoHash,
+          totalFiles: torrent.files.length,
+          gameFiles: gameFiles.length,
+          totalSize: torrent.length,
+          totalGameSize: totalGameSize,
+          files: torrent.files.map((f) => ({
+            name: f.name,
+            size: f.length,
+            isGame: f.name.match(/\.(nsp|nsz|xci)$/i) !== null,
+          })),
+        };
+
+        // Remove o torrent após obter informações
+        setTimeout(() => {
+          try {
+            torrent.destroy();
+            client.remove(torrent);
+          } catch (e) {
+            // Ignora erros ao remover
+          }
+        }, 1000);
+
+        if (!res.headersSent) {
+          resolve(res.json({ success: true, info }));
+        }
+      });
+
+      previewTorrent.on("error", (err) => {
+        clearTimeout(timeoutId);
+        try {
+          if (previewTorrent) {
+            previewTorrent.destroy();
+            client.remove(previewTorrent);
+          }
+        } catch (e) {
+          // Ignora erros ao remover
+        }
+        if (!res.headersSent) {
+          resolve(
+            res
+              .status(400)
+              .json({ error: `Erro ao processar torrent: ${err.message}` })
+          );
+        }
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (!res.headersSent) {
+        resolve(
+          res.status(500).json({ error: `Erro interno: ${err.message}` })
+        );
+      }
+    }
+  });
+});
+
 // --- ROTAS DE UPLOAD ---
 router.post("/bridge/upload", requireAuth, async (req, res) => {
   const magnet = req.body.magnet;

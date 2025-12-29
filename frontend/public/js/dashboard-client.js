@@ -137,92 +137,269 @@ if (dropZone) {
   });
 }
 
+// Função para formatar tamanho
+function formatSize(bytes) {
+  if (bytes > 1024 * 1024 * 1024) {
+    return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+  }
+  return (bytes / 1024 / 1024).toFixed(2) + " MB";
+}
+
+// Função para exibir modal de preview
+function showTorrentPreview(info, onConfirm) {
+  const modal = document.createElement("div");
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h2>📋 Pré-visualização do Torrent</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom: 20px;">
+          <strong>Nome:</strong> ${escapeHtml(info.name || "Desconhecido")}
+        </div>
+        <div style="margin-bottom: 20px;">
+          <strong>Info Hash:</strong> <code style="font-size: 0.85em;">${
+            info.infoHash || "N/A"
+          }</code>
+        </div>
+        <div style="margin-bottom: 20px;">
+          <strong>Total de arquivos:</strong> ${info.totalFiles}
+          ${
+            info.gameFiles > 0
+              ? ` • <span style="color: var(--success);">🎮 ${info.gameFiles} jogos</span>`
+              : ""
+          }
+        </div>
+        <div style="margin-bottom: 20px;">
+          <strong>Tamanho total:</strong> ${formatSize(info.totalSize)}
+          ${
+            info.gameFiles > 0
+              ? ` • <span style="color: var(--success);">Jogos: ${formatSize(
+                  info.totalGameSize
+                )}</span>`
+              : ""
+          }
+        </div>
+        <div style="margin-top: 20px;">
+          <strong>Arquivos:</strong>
+          <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: var(--card); border-radius: 8px; border: 1px solid var(--border);">
+            ${info.files
+              .map(
+                (f, i) => `
+              <div style="padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.9em;">
+                ${f.isGame ? "🎮" : "📄"} ${escapeHtml(
+                  f.name
+                )} <span style="color: var(--text-muted);">(${formatSize(
+                  f.size
+                )})</span>
+              </div>
+            `
+              )
+              .join("")}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+        <button onclick="this.closest('.modal-overlay').remove()" style="padding: 10px 20px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;">
+          Cancelar
+        </button>
+        <button id="confirm-download-btn" style="padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+          ✅ Confirmar Download
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // Adiciona handler de confirmação
+  const confirmBtn = modal.querySelector("#confirm-download-btn");
+  confirmBtn.addEventListener("click", () => {
+    modal.remove();
+    onConfirm();
+  });
+
+  // Fecha ao clicar fora
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.remove();
+  });
+}
+
 async function uploadMagnet() {
   const magnet = document.getElementById("magnet").value.trim();
   if (!magnet) return alert("Cole um magnet link!");
 
   const btn = document.getElementById("uploadBtn");
-  btn.innerText = "Enviando...";
+  btn.innerText = "Analisando...";
   btn.disabled = true;
 
   try {
-    const res = await fetch("/bridge/upload", {
+    // Primeiro, faz preview do torrent
+    const previewRes = await fetch("/bridge/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ magnet }),
     });
 
-    if (res.status === 401) return (window.location.href = "/admin/login");
+    if (previewRes.status === 401)
+      return (window.location.href = "/admin/login");
 
-    const data = await res.json();
-    if (res.ok) {
-      document.getElementById("magnet").value = "";
-      if (data.queued) {
-        showNotification(
-          `📋 Adicionado à fila (posição ${data.position})`,
-          "info"
-        );
-      } else {
-        showNotification("🚀 Download iniciado!", "success");
-      }
-      loadStatus();
-    } else {
-      alert(data.error || "Erro ao iniciar.");
+    const previewData = await previewRes.json();
+
+    if (!previewRes.ok) {
+      alert(previewData.error || "Erro ao analisar torrent");
+      btn.innerText = "🚀 Iniciar";
+      btn.disabled = false;
+      return;
     }
+
+    // Mostra preview e aguarda confirmação
+    showTorrentPreview(previewData.info, async () => {
+      btn.innerText = "Enviando...";
+
+      try {
+        const res = await fetch("/bridge/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ magnet }),
+        });
+
+        if (res.status === 401) return (window.location.href = "/admin/login");
+
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById("magnet").value = "";
+          if (data.queued) {
+            showNotification(
+              `📋 Adicionado à fila (posição ${data.position})`,
+              "info"
+            );
+          } else {
+            showNotification("🚀 Download iniciado!", "success");
+          }
+          loadStatus();
+        } else {
+          alert(data.error || "Erro ao iniciar.");
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Erro de conexão");
+      }
+
+      btn.innerText = "🚀 Iniciar";
+      btn.disabled = false;
+    });
+
+    btn.innerText = "🚀 Iniciar";
+    btn.disabled = false;
   } catch (e) {
     console.error(e);
-    alert("Erro de conexão");
+    alert("Erro ao analisar torrent");
+    btn.innerText = "🚀 Iniciar";
+    btn.disabled = false;
   }
-
-  btn.innerText = "🚀 Iniciar";
-  btn.disabled = false;
 }
 
 async function uploadTorrentFile() {
   if (!selectedFile) return alert("Selecione um arquivo .torrent!");
 
   const btn = document.getElementById("uploadTorrentBtn");
-  btn.innerText = "Enviando...";
+  btn.innerText = "Analisando...";
   btn.disabled = true;
 
-  const formData = new FormData();
-  formData.append("torrentFile", selectedFile);
-
   try {
-    const res = await fetch("/bridge/upload-torrent", {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
+    // Converte arquivo para base64 para preview
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(",")[1];
 
-    if (res.status === 401) return (window.location.href = "/admin/login");
+      try {
+        // Primeiro, faz preview do torrent
+        const previewRes = await fetch("/bridge/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ torrentFile: base64 }),
+        });
 
-    const data = await res.json();
-    if (res.ok) {
-      document.getElementById("torrentFile").value = "";
-      document.getElementById("selectedFile").textContent = "";
-      document.getElementById("uploadTorrentBtn").classList.remove("show");
-      selectedFile = null;
-      if (data.queued) {
-        showNotification(
-          `📋 Adicionado à fila (posição ${data.position})`,
-          "info"
-        );
-      } else {
-        showNotification("🚀 Download iniciado!", "success");
+        if (previewRes.status === 401)
+          return (window.location.href = "/admin/login");
+
+        const previewData = await previewRes.json();
+
+        if (!previewRes.ok) {
+          alert(previewData.error || "Erro ao analisar torrent");
+          btn.innerText = "🚀 Enviar";
+          btn.disabled = false;
+          return;
+        }
+
+        // Mostra preview e aguarda confirmação
+        showTorrentPreview(previewData.info, async () => {
+          btn.innerText = "Enviando...";
+
+          const formData = new FormData();
+          formData.append("torrentFile", selectedFile);
+
+          try {
+            const res = await fetch("/bridge/upload-torrent", {
+              method: "POST",
+              credentials: "include",
+              body: formData,
+            });
+
+            if (res.status === 401)
+              return (window.location.href = "/admin/login");
+
+            const data = await res.json();
+            if (res.ok) {
+              document.getElementById("torrentFile").value = "";
+              document.getElementById("selectedFile").textContent = "";
+              document
+                .getElementById("uploadTorrentBtn")
+                .classList.remove("show");
+              selectedFile = null;
+              if (data.queued) {
+                showNotification(
+                  `📋 Adicionado à fila (posição ${data.position})`,
+                  "info"
+                );
+              } else {
+                showNotification("🚀 Download iniciado!", "success");
+              }
+              loadStatus();
+            } else {
+              alert(data.error || "Erro ao processar.");
+            }
+          } catch (e) {
+            console.error(e);
+            alert("Erro de conexão");
+          }
+
+          btn.innerText = "🚀 Enviar";
+          btn.disabled = false;
+        });
+
+        btn.innerText = "🚀 Enviar";
+        btn.disabled = false;
+      } catch (e) {
+        console.error(e);
+        alert("Erro ao analisar torrent");
+        btn.innerText = "🚀 Enviar";
+        btn.disabled = false;
       }
-      loadStatus();
-    } else {
-      alert(data.error || "Erro ao processar.");
-    }
+    };
+
+    reader.readAsDataURL(selectedFile);
   } catch (e) {
     console.error(e);
-    alert("Erro de conexão");
+    alert("Erro ao ler arquivo");
+    btn.innerText = "🚀 Enviar";
+    btn.disabled = false;
   }
-
-  btn.innerText = "🚀 Enviar";
-  btn.disabled = false;
 }
 
 function getPhaseLabel(phase) {
