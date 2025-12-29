@@ -1,6 +1,6 @@
 /**
  * DATABASE - Conexão e modelos MongoDB
- * Mana Shop v1.0
+ * Mana Shop v1.1 - Com suporte a Versionamento e TitleID
  */
 
 import mongoose from "mongoose";
@@ -191,12 +191,19 @@ const downloadHistorySchema = new mongoose.Schema({
   source: { type: String, enum: ["magnet", "torrent-file"], default: "magnet" },
 });
 
+// ⚠️ ATUALIZAÇÃO CRÍTICA AQUI ⚠️
 // Schema para cache de jogos indexados
 const gameCacheSchema = new mongoose.Schema({
   url: { type: String, required: true },
   size: { type: Number },
   name: { type: String, required: true },
-  id: { type: String }, // Title ID do jogo
+  id: { type: String }, // Title ID Principal
+
+  // NOVOS CAMPOS PARA TINFOIL RECONHECER JOGO NOVO/UPDATE
+  titleId: { type: String }, // Redundância que o Tinfoil gosta
+  version: { type: Number, default: 0 }, // Essencial para aba New Games / Updates
+  filename: { type: String }, // Nome do arquivo original (para evitar erro de parse na URL)
+
   path: { type: String },
   indexedAt: { type: Date, default: Date.now },
 });
@@ -248,7 +255,7 @@ export async function getDownloadHistory(limit = 50) {
 }
 
 // ═══════════════════════════════════════════════
-// FUNÇÕES AUXILIARES - GAME CACHE
+// FUNÇÕES AUXILIARES - GAME CACHE (ATUALIZADO)
 // ═══════════════════════════════════════════════
 
 export async function saveGameCache(games) {
@@ -264,7 +271,12 @@ export async function saveGameCache(games) {
           url: g.url,
           size: g.size,
           name: g.name,
-          id: g.id || null, // ✅ Salva o Title ID
+          id: g.id || null,
+          // ⚠️ MAPEAMENTO DOS NOVOS CAMPOS
+          titleId: g.titleId || g.id,
+          version: g.version || 0,
+          filename: g.filename || g.name,
+
           path: g.path || "",
           indexedAt: new Date(),
         }))
@@ -278,7 +290,9 @@ export async function saveGameCache(games) {
       { upsert: true }
     );
 
-    console.log(`[DB] 📚 Cache atualizado: ${games.length} jogos`);
+    console.log(
+      `[DB] 📚 Cache atualizado no MongoDB: ${games.length} jogos com metadados.`
+    );
     return true;
   } catch (err) {
     console.error("[DB] Erro ao salvar cache:", err.message);
@@ -298,7 +312,11 @@ export async function getGameCache() {
         url: g.url,
         size: g.size,
         name: g.name,
-        id: g.id || null, // ✅ Recupera o Title ID
+        id: g.id || null,
+        // ⚠️ RETORNO DOS NOVOS CAMPOS PARA O FRONT/TINFOIL
+        titleId: g.titleId || g.id,
+        version: g.version || 0,
+        filename: g.filename || g.name,
       })),
       lastUpdate: meta?.value ? new Date(meta.value).getTime() : null,
     };
