@@ -27,9 +27,13 @@ const dbx = new Dropbox({
 const app = express();
 app.enable("trust proxy");
 
-// Middleware de log para debug (apenas para /api e /download)
+// Logger de Requisições (Diagnóstico)
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api") || req.path.startsWith("/download")) {
+  // Ignora assets estáticos para limpar o log
+  if (
+    !req.path.includes(".") &&
+    (req.path.startsWith("/api") || req.path.startsWith("/download"))
+  ) {
     console.log(
       `[REQ] ${req.method} ${req.path} - IP: ${req.ip} - Auth: ${
         req.headers.authorization ? "Sim" : "Não"
@@ -116,18 +120,15 @@ async function getDirectLink(path) {
 
 async function buildGameIndex() {
   if (isIndexing) {
-    log.warn("Indexação já está rodando. Ignorando solicitação.");
+    log.warn("Indexação já está rodando.");
     return;
   }
-
   isIndexing = true;
   indexingProgress = "Iniciando Scan...";
   const startTime = Date.now();
-
-  log.info("🚀 INICIANDO INDEXAÇÃO COMPLETA (BACKGROUND TASK)...");
+  log.info("🚀 INICIANDO INDEXAÇÃO COMPLETA...");
 
   try {
-    // 1. Escaneamento Recursivo
     let allFiles = [];
     let response = await dbx.filesListFolder({
       path: ROOT_GAMES_FOLDER,
@@ -135,87 +136,74 @@ async function buildGameIndex() {
       limit: 2000,
     });
     allFiles = allFiles.concat(response.result.entries);
-
     while (response.result.has_more) {
-      log.info("...buscando mais arquivos...");
       response = await dbx.filesListFolderContinue({
         cursor: response.result.cursor,
       });
       allFiles = allFiles.concat(response.result.entries);
     }
-
     const validFiles = allFiles.filter(
       (entry) =>
         entry[".tag"] === "file" && entry.name.match(/\.(nsp|nsz|xci)$/i)
     );
+    log.info(`📁 Total: ${validFiles.length} jogos.`);
 
-    log.info(
-      `📁 Total encontrado: ${validFiles.length} jogos. Iniciando geração de links...`
-    );
-
-    // 2. Processamento em Lotes (BATCHING) - A SOLUÇÃO DO CRASH
-    // Processa apenas 5 por vez.
     const games = await processInBatches(validFiles, 5, async (file) => {
       const directUrl = await getDirectLink(file.path_lower);
       if (!directUrl) return null;
-
       const displayName = file.name
         .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
         .trim();
-
-      return {
-        url: directUrl,
-        size: file.size,
-        name: displayName,
-      };
+      return { url: directUrl, size: file.size, name: displayName };
     });
 
-    // Finalização
     cachedGames = games.filter((g) => g !== null);
     lastCacheTime = Date.now();
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    // Salva no MongoDB para persistência
     await saveGameCache(cachedGames);
-
-    log.info(
-      `✅ INDEXAÇÃO CONCLUÍDA em ${duration}s! ${cachedGames.length} jogos prontos.`
-    );
+    log.info(`✅ INDEXAÇÃO CONCLUÍDA! ${cachedGames.length} jogos.`);
     isIndexing = false;
     indexingProgress = "Concluído";
   } catch (e) {
-    log.error("FALHA FATAL NA INDEXAÇÃO:", e);
+    log.error("FALHA INDEXAÇÃO:", e);
     isIndexing = false;
     indexingProgress = "Erro";
   }
 }
 
-// --- ROTAS ---
+// --- ROTAS DA LOJA (CORREÇÃO AQUI) ---
 
-app.get("/api", (req, res) => {
-  // Se o cache estiver vazio e não estiver indexando (ex: crashou antes), força reindex
+// Aceita tanto /api quanto /api/ (Regex ou Array)
+app.get(["/api", "/api/"], (req, res) => {
+  // Se o cache estiver vazio e não estiver indexando, dispara index
   if (cachedGames.length === 0 && !isIndexing) {
     buildGameIndex();
   }
 
+  // Se ainda estiver indexando e vazio
   if (isIndexing && cachedGames.length === 0) {
-    // Resposta provisória enquanto carrega
-    return res.json({
-      success: `Mana Shop Iniciando... Aguarde. (${indexingProgress})`,
+    const responseData = {
+      success: `Loja Iniciando... (${indexingProgress})`,
       files: [],
-    });
+    };
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    return res.json(responseData);
   }
 
-  res.json({
+  const responseData = {
     files: cachedGames,
-    success: `Capivara Shop ( ${cachedGames.length} jogos)`,
-  });
+    success: `Capivara Shop (${cachedGames.length} jogos)`,
+  };
+
+  // Força JSON estrito e não faz cache do JSON
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
+  res.json(responseData);
 });
 
-// Endpoint para forçar atualização manual se precisar
 app.get("/refresh", (req, res) => {
   buildGameIndex();
-  res.send("Indexação iniciada em background. Acompanhe os logs.");
+  res.send("Indexação iniciada.");
 });
 
 // Endpoint para status da indexação (usado pelo admin dashboard)
@@ -231,30 +219,19 @@ app.get("/indexing-status", (req, res) => {
 // --- STARTUP ---
 
 async function startServer() {
-  // 1. Conecta ao MongoDB
   await connectDB();
-
-  // 2. Tenta carregar cache do MongoDB
   const savedCache = await getGameCache();
   if (savedCache.games.length > 0) {
     cachedGames = savedCache.games;
     lastCacheTime = savedCache.lastUpdate || Date.now();
-    log.info(`📚 Cache carregado do MongoDB: ${cachedGames.length} jogos`);
+    log.info(`📚 Cache carregado: ${cachedGames.length} jogos`);
   }
 
-  // 3. Inicia o servidor
   app.listen(PORT, () => {
-    log.info(`🚀 Mana Shop v20 rodando na porta ${PORT}`);
-
-    // 4. Se não tem cache OU cache muito antigo, re-indexa
+    log.info(`🚀 Mana Shop rodando na porta ${PORT}`);
     const cacheAge = Date.now() - lastCacheTime;
     if (cachedGames.length === 0 || cacheAge > CACHE_DURATION) {
-      log.info("🔄 Iniciando indexação...");
       buildGameIndex();
-    } else {
-      log.info(
-        `✅ Usando cache existente (${Math.floor(cacheAge / 60000)} min atrás)`
-      );
     }
   });
 }
