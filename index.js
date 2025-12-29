@@ -5,8 +5,43 @@ import dotenv from "dotenv";
 import manaBridge from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
+import { User } from "./database.js";
 
 dotenv.config();
+
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASS = process.env.ADMIN_PASS;
+
+// Função simples de autenticação para rotas /bridge/*
+const requireAuth = async (req, res, next) => {
+  const cookies = req.headers.cookie || "";
+  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
+  let token = tokenMatch ? tokenMatch[1] : null;
+
+  if (token) {
+    try {
+      token = decodeURIComponent(token);
+    } catch (e) {}
+
+    const adminToken = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
+    if (token === adminToken) {
+      return next();
+    }
+
+    try {
+      const decoded = Buffer.from(token, "base64").toString();
+      if (decoded.startsWith("user:")) {
+        const userId = decoded.split(":")[1];
+        const user = await User.findById(userId);
+        if (user) {
+          return next();
+        }
+      }
+    } catch (e) {}
+  }
+
+  res.status(401).json({ error: "Não autorizado" });
+};
 
 const PORT = process.env.PORT || 8080;
 const ROOT_GAMES_FOLDER = "/Games_Switch";
@@ -212,6 +247,15 @@ app.get("/indexing-status", (req, res) => {
     isIndexing,
     progress: indexingProgress,
     totalGames: cachedGames.length,
+    lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
+  });
+});
+
+// Endpoint para listar jogos (usado pelo admin dashboard)
+app.get("/bridge/games", requireAuth, (req, res) => {
+  res.json({
+    games: cachedGames,
+    total: cachedGames.length,
     lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
   });
 });

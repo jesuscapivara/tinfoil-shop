@@ -462,6 +462,29 @@ export function dashboardTemplate() {
             transition: border-color 0.2s;
         }
         input[type="text"]:focus { border-color: var(--primary); outline: none; }
+        
+        .search-box {
+            margin-bottom: 20px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--white);
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+        .search-box input:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+        
         button { 
             padding: 12px 20px; 
             background: var(--primary); 
@@ -872,6 +895,9 @@ export function dashboardTemplate() {
             <button class="section-tab" onclick="switchSection('completed')">
                 ✓ Finalizados <span id="completed-count" class="count">0</span>
             </button>
+            <button class="section-tab" onclick="switchSection('games')">
+                🎮 Jogos <span id="games-count" class="count">0</span>
+            </button>
         </div>
 
         <div id="active-section" class="section active">
@@ -889,6 +915,17 @@ export function dashboardTemplate() {
         <div id="completed-section" class="section">
             <div id="completed-list" class="grid">
                 <div class="empty">Nenhum download finalizado ainda</div>
+            </div>
+        </div>
+
+        <div id="games-section" class="section">
+            <div class="search-box" style="margin-bottom: 20px;">
+                <input type="text" id="game-search" placeholder="🔍 Buscar jogos..." 
+                       onkeyup="filterGames()" style="width: 100%; padding: 12px; border-radius: 8px; 
+                       border: 1px solid var(--border); background: var(--card); color: var(--text);">
+            </div>
+            <div id="games-list" class="grid">
+                <div class="empty">Carregando jogos...</div>
             </div>
         </div>
     </div>
@@ -949,11 +986,18 @@ export function dashboardTemplate() {
             }
         }
 
+        let allGames = []; // Armazena todos os jogos para filtro
+        
         function switchSection(section) {
             document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
             document.getElementById(section + '-section').classList.add('active');
+            
+            // Carrega jogos quando a aba for clicada
+            if (section === 'games') {
+                loadGames();
+            }
         }
         
         function handleFileSelect(input) {
@@ -1482,6 +1526,70 @@ export function dashboardTemplate() {
                 console.error(e);
                 showNotification('Erro de conexão', 'error');
             }
+        }
+        
+        // Função para carregar jogos
+        async function loadGames() {
+            try {
+                const res = await fetch('/bridge/games', { credentials: 'include' });
+                if (res.status === 401) return window.location.href = '/admin/login';
+                
+                const data = await res.json();
+                allGames = data.games || [];
+                
+                document.getElementById('games-count').textContent = allGames.length;
+                renderGames(allGames);
+            } catch(e) {
+                console.error('Erro ao carregar jogos:', e);
+                document.getElementById('games-list').innerHTML = 
+                    '<div class="empty">Erro ao carregar jogos</div>';
+            }
+        }
+        
+        // Função para renderizar jogos
+        function renderGames(games) {
+            const list = document.getElementById('games-list');
+            
+            if (games.length === 0) {
+                list.innerHTML = '<div class="empty">Nenhum jogo encontrado</div>';
+                return;
+            }
+            
+            list.innerHTML = games.map(game => {
+                const sizeMB = (game.size / 1024 / 1024).toFixed(2);
+                const sizeGB = (game.size / 1024 / 1024 / 1024).toFixed(2);
+                const sizeDisplay = game.size > 1024 * 1024 * 1024 ? \`\${sizeGB} GB\` : \`\${sizeMB} MB\`;
+                
+                return \`
+                    <div class="card" style="cursor: pointer;" onclick="window.open('\${game.url}', '_blank')">
+                        <div class="card-header">
+                            <span class="game-name" title="\${game.name}">\${game.name}</span>
+                        </div>
+                        <div class="status-text">
+                            📦 Tamanho: \${sizeDisplay}
+                        </div>
+                        <div class="status-text" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;">
+                            Clique para abrir no Dropbox
+                        </div>
+                    </div>
+                \`;
+            }).join('');
+        }
+        
+        // Função para filtrar jogos
+        function filterGames() {
+            const searchTerm = document.getElementById('game-search').value.toLowerCase().trim();
+            
+            if (!searchTerm) {
+                renderGames(allGames);
+                return;
+            }
+            
+            const filtered = allGames.filter(game => 
+                game.name.toLowerCase().includes(searchTerm)
+            );
+            
+            renderGames(filtered);
         }
         
         // Carrega status inicial e atualiza a cada 2 segundos
