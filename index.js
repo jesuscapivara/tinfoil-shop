@@ -2,10 +2,16 @@ import express from "express";
 import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import manaBridge from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
 import { User } from "./database.js";
+
+// ES Modules __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -61,6 +67,9 @@ const dbx = new Dropbox({
 
 const app = express();
 app.enable("trust proxy");
+
+// Servir arquivos estáticos do frontend
+app.use("/public", express.static(path.join(__dirname, "frontend/public")));
 
 // Logger
 app.use((req, res, next) => {

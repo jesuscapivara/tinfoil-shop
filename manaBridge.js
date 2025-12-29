@@ -4,7 +4,8 @@ import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import multer from "multer";
-import { loginTemplate, dashboardTemplate } from "./templates.js";
+import { loginView } from "./frontend/views/login.js";
+import { dashboardView } from "./frontend/views/dashboard.js";
 import { saveDownloadHistory, getDownloadHistory } from "./database.js";
 import {
   createUser,
@@ -256,7 +257,7 @@ router.get("/admin/login", async (req, res) => {
     }
   }
 
-  res.send(loginTemplate());
+  res.send(loginView());
 });
 
 router.post("/bridge/auth", async (req, res) => {
@@ -368,7 +369,7 @@ router.get("/admin/logout", (req, res) => {
 });
 
 router.get("/admin", requireAuth, (req, res) => {
-  res.send(dashboardTemplate());
+  res.send(dashboardView());
 });
 
 router.get("/bridge/status", requireAuth, (req, res) => {
