@@ -60,11 +60,38 @@ export const User = mongoose.model("User", userSchema);
 export async function createUser(email, webPassword, isAdmin = false) {
   if (!isConnected) return null;
 
-  // Gera credenciais Tinfoil
-  const tinfoilUser = email
+  // Gera base do username Tinfoil
+  const baseUser = email
     .split("@")[0]
     .replace(/[^a-zA-Z0-9]/g, "")
     .toLowerCase();
+
+  // Garante que o tinfoilUser seja único
+  let tinfoilUser = baseUser;
+  let counter = 1;
+  let exists = await User.findOne({ tinfoilUser });
+
+  while (exists) {
+    tinfoilUser = `${baseUser}${counter}`;
+    exists = await User.findOne({ tinfoilUser });
+    counter++;
+
+    // Proteção contra loop infinito
+    if (counter > 1000) {
+      // Se chegar a 1000, usa hash do email
+      tinfoilUser = `user${Buffer.from(email)
+        .toString("base64")
+        .slice(0, 8)
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toLowerCase()}`;
+      exists = await User.findOne({ tinfoilUser });
+      if (!exists) break;
+      // Se ainda existir, adiciona timestamp
+      tinfoilUser = `user${Date.now().toString().slice(-8)}`;
+      break;
+    }
+  }
+
   const tinfoilPass = Math.random().toString(36).slice(-6).toUpperCase(); // 6 caracteres
 
   try {
@@ -77,6 +104,9 @@ export async function createUser(email, webPassword, isAdmin = false) {
       tinfoilPass,
     });
     await user.save();
+    console.log(
+      `[DB] ✅ Usuário criado: ${email} → tinfoilUser: ${tinfoilUser}`
+    );
     return user;
   } catch (err) {
     console.error("[DB] Erro ao criar usuário:", err.message);
