@@ -1546,7 +1546,7 @@ export function dashboardTemplate() {
             }
         }
         
-        // Função para renderizar jogos
+        // Função para renderizar jogos (ATUALIZADA)
         function renderGames(games) {
             const list = document.getElementById('games-list');
             
@@ -1556,20 +1556,50 @@ export function dashboardTemplate() {
             }
             
             list.innerHTML = games.map(game => {
-                const sizeMB = (game.size / 1024 / 1024).toFixed(2);
                 const sizeGB = (game.size / 1024 / 1024 / 1024).toFixed(2);
+                const sizeMB = (game.size / 1024 / 1024).toFixed(2);
                 const sizeDisplay = game.size > 1024 * 1024 * 1024 ? \`\${sizeGB} GB\` : \`\${sizeMB} MB\`;
                 
+                // 🖼️ URL da Imagem Mágica
+                // Se tiver ID, usa o tinfoil.media. Se não, usa uma imagem padrão.
+                const imgUrl = game.id 
+                    ? \`https://tinfoil.media/title/\${game.id}/0/icon.jpg\` 
+                    : 'https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg';
+                
+                // Link para a página do Tinfoil (como você pediu)
+                const tinfoilUrl = game.id 
+                    ? \`https://tinfoil.io/Title/\${game.id}\` 
+                    : '#';
+
                 return \`
-                    <div class="card" style="cursor: pointer;" onclick="window.open('\${game.url}', '_blank')">
-                        <div class="card-header">
-                            <span class="game-name" title="\${game.name}">\${game.name}</span>
+                    <div class="card" style="display: flex; gap: 15px; padding: 15px; align-items: center;">
+                        <div style="flex-shrink: 0;">
+                            <img src="\${imgUrl}" 
+                                 alt="\${game.name}" 
+                                 style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover; background: #000;"
+                                 onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg'">
                         </div>
-                        <div class="status-text">
-                            📦 Tamanho: \${sizeDisplay}
-                        </div>
-                        <div class="status-text" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;">
-                            Clique para abrir no Dropbox
+
+                        <div style="flex: 1; min-width: 0;">
+                            <div class="card-header" style="margin-bottom: 5px;">
+                                <span class="game-name" title="\${game.name}" style="font-size: 1rem;">\${game.name}</span>
+                            </div>
+                            
+                            <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted);">
+                                <span class="status-badge online">\${sizeDisplay}</span>
+                                \${game.id ? \`<span class="status-badge" style="background: rgba(99, 102, 241, 0.1); color: var(--primary);">\${game.id}</span>\` : ''}
+                            </div>
+                            
+                            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                <button onclick="window.open('\${game.url}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem;">
+                                    📥 Download Direto
+                                </button>
+                                \${game.id ? \`
+                                    <button onclick="window.open('\${tinfoilUrl}', '_blank')" style="padding: 6px 12px; font-size: 0.75rem; background: #222; border: 1px solid #444;">
+                                        🔗 Ver no Tinfoil.io
+                                    </button>
+                                \` : ''}
+                            </div>
                         </div>
                     </div>
                 \`;
