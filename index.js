@@ -27,8 +27,30 @@ const dbx = new Dropbox({
 const app = express();
 app.enable("trust proxy");
 
+// Middleware de log para debug (apenas para /api e /download)
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/download")) {
+    console.log(
+      `[REQ] ${req.method} ${req.path} - IP: ${req.ip} - Auth: ${
+        req.headers.authorization ? "Sim" : "Não"
+      }`
+    );
+  }
+  next();
+});
+
 app.use(express.json()); // Necessário para ler o JSON do magnet link
 app.use(manaBridge);
+
+// ROTA DE DEBUG PÚBLICA (Para testar se o servidor está vivo sem senha)
+app.get("/health", (req, res) => {
+  res.json({
+    status: "Online",
+    time: new Date().toISOString(),
+    games: cachedGames.length,
+  });
+});
+
 app.use("/api", tinfoilAuth);
 app.use("/download", tinfoilAuth);
 
