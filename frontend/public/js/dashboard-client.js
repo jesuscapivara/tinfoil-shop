@@ -167,18 +167,77 @@ function showTorrentPreview(info, onConfirm) {
         <div style="margin-bottom: 20px;">
           <strong>Total de arquivos:</strong> ${info.totalFiles}
           ${
-            info.gameFiles > 0
-              ? ` • <span style="color: var(--success);">🎮 ${info.gameFiles} jogos</span>`
+            info.stats && info.stats.total > 0
+              ? `
+              <div style="margin-top: 8px; padding: 10px; background: var(--surface); border-radius: 6px; font-size: 0.9em;">
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                  ${
+                    info.stats.base > 0
+                      ? `<span style="color: var(--success);">🎮 ${
+                          info.stats.base
+                        } jogo${info.stats.base > 1 ? "s" : ""} base</span>`
+                      : ""
+                  }
+                  ${
+                    info.stats.update > 0
+                      ? `<span style="color: var(--warning);">🔄 ${
+                          info.stats.update
+                        } update${info.stats.update > 1 ? "s" : ""}</span>`
+                      : ""
+                  }
+                  ${
+                    info.stats.dlc > 0
+                      ? `<span style="color: var(--cyan);">📦 ${
+                          info.stats.dlc
+                        } DLC${info.stats.dlc > 1 ? "s" : ""}</span>`
+                      : ""
+                  }
+                  ${
+                    info.stats.unknown > 0
+                      ? `<span style="color: var(--text-muted);">❓ ${
+                          info.stats.unknown
+                        } desconhecido${
+                          info.stats.unknown > 1 ? "s" : ""
+                        }</span>`
+                      : ""
+                  }
+                </div>
+              </div>
+              `
               : ""
           }
         </div>
         <div style="margin-bottom: 20px;">
           <strong>Tamanho total:</strong> ${formatSize(info.totalSize)}
           ${
-            info.gameFiles > 0
-              ? ` • <span style="color: var(--success);">Jogos: ${formatSize(
-                  info.totalGameSize
-                )}</span>`
+            info.sizes && info.sizes.totalGame > 0
+              ? `
+              <div style="margin-top: 8px; padding: 10px; background: var(--surface); border-radius: 6px; font-size: 0.9em;">
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                  ${
+                    info.sizes.base > 0
+                      ? `<span style="color: var(--success);">🎮 Base: ${formatSize(
+                          info.sizes.base
+                        )}</span>`
+                      : ""
+                  }
+                  ${
+                    info.sizes.update > 0
+                      ? `<span style="color: var(--warning);">🔄 Updates: ${formatSize(
+                          info.sizes.update
+                        )}</span>`
+                      : ""
+                  }
+                  ${
+                    info.sizes.dlc > 0
+                      ? `<span style="color: var(--cyan);">📦 DLCs: ${formatSize(
+                          info.sizes.dlc
+                        )}</span>`
+                      : ""
+                  }
+                </div>
+              </div>
+              `
               : ""
           }
         </div>
@@ -186,17 +245,47 @@ function showTorrentPreview(info, onConfirm) {
           <strong>Arquivos:</strong>
           <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: var(--card); border-radius: 8px; border: 1px solid var(--border);">
             ${info.files
-              .map(
-                (f, i) => `
-              <div style="padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.9em;">
-                ${f.isGame ? "🎮" : "📄"} ${escapeHtml(
+              .map((f, i) => {
+                let icon = "📄";
+                let typeLabel = "";
+                let typeColor = "var(--text-muted)";
+
+                if (f.isGame) {
+                  if (f.type === "BASE") {
+                    icon = "🎮";
+                    typeLabel = "BASE";
+                    typeColor = "var(--success)";
+                  } else if (f.type === "UPDATE") {
+                    icon = "🔄";
+                    typeLabel = "UPDATE";
+                    typeColor = "var(--warning)";
+                  } else if (f.type === "DLC") {
+                    icon = "📦";
+                    typeLabel = "DLC";
+                    typeColor = "var(--cyan)";
+                  } else {
+                    icon = "❓";
+                    typeLabel = "UNKNOWN";
+                  }
+                }
+
+                return `
+              <div style="padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.9em; display: flex; align-items: center; gap: 8px;">
+                <span>${icon}</span>
+                <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(
                   f.name
-                )} <span style="color: var(--text-muted);">(${formatSize(
+                )}</span>
+                ${
+                  f.type && f.type !== "OTHER"
+                    ? `<span style="color: ${typeColor}; font-size: 0.85em; font-weight: 600;">[${typeLabel}]</span>`
+                    : ""
+                }
+                <span style="color: var(--text-muted); white-space: nowrap;">${formatSize(
                   f.size
-                )})</span>
+                )}</span>
               </div>
-            `
-              )
+            `;
+              })
               .join("")}
           </div>
         </div>

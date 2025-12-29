@@ -1400,24 +1400,77 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
       previewTorrent = client.add(torrentInput, { path: "/tmp" }, (torrent) => {
         clearTimeout(timeoutId);
 
+        // Função para identificar tipo de arquivo
+        const getFileType = (fileName) => {
+          // Tenta extrair Title ID do nome do arquivo
+          const idMatch = fileName.match(/\[([0-9A-Fa-f]{16})\]/i);
+          if (!idMatch) return "UNKNOWN";
+
+          const titleId = idMatch[1].toUpperCase();
+          const suffix = titleId.slice(-3);
+
+          if (suffix === "800") return "UPDATE";
+          if (suffix === "000") return "BASE";
+          return "DLC";
+        };
+
         // Extrai informações do torrent
         const gameFiles = torrent.files.filter((f) =>
           f.name.match(/\.(nsp|nsz|xci)$/i)
         );
+
+        // Classifica arquivos por tipo
+        const baseGames = [];
+        const updates = [];
+        const dlcs = [];
+        const unknown = [];
+
+        gameFiles.forEach((f) => {
+          const type = getFileType(f.name);
+          const fileInfo = {
+            name: f.name,
+            size: f.length,
+            type: type,
+          };
+
+          if (type === "BASE") baseGames.push(fileInfo);
+          else if (type === "UPDATE") updates.push(fileInfo);
+          else if (type === "DLC") dlcs.push(fileInfo);
+          else unknown.push(fileInfo);
+        });
+
         const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
+        const baseSize = baseGames.reduce((acc, f) => acc + f.size, 0);
+        const updateSize = updates.reduce((acc, f) => acc + f.size, 0);
+        const dlcSize = dlcs.reduce((acc, f) => acc + f.size, 0);
 
         const info = {
           name: torrent.name,
           infoHash: torrent.infoHash,
           totalFiles: torrent.files.length,
-          gameFiles: gameFiles.length,
-          totalSize: torrent.length,
-          totalGameSize: totalGameSize,
-          files: torrent.files.map((f) => ({
-            name: f.name,
-            size: f.length,
-            isGame: f.name.match(/\.(nsp|nsz|xci)$/i) !== null,
-          })),
+          stats: {
+            base: baseGames.length,
+            update: updates.length,
+            dlc: dlcs.length,
+            unknown: unknown.length,
+            total: gameFiles.length,
+          },
+          sizes: {
+            total: torrent.length,
+            totalGame: totalGameSize,
+            base: baseSize,
+            update: updateSize,
+            dlc: dlcSize,
+          },
+          files: torrent.files.map((f) => {
+            const isGame = f.name.match(/\.(nsp|nsz|xci)$/i) !== null;
+            return {
+              name: f.name,
+              size: f.length,
+              isGame: isGame,
+              type: isGame ? getFileType(f.name) : "OTHER",
+            };
+          }),
         };
 
         // Remove o torrent após obter informações
