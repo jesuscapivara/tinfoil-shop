@@ -1,63 +1,124 @@
-import { validateTinfoilCredentials, User } from "./database.js";
+import { User } from "./database.js";
+
+/**
+ * CACHE DE AUTENTICAÇÃO (HOT CACHE)
+ * Armazena resultados de validação na RAM para evitar flood no MongoDB.
+ * Estrutura: { "user:pass": { valid: boolean, expiresAt: number } }
+ */
+const AUTH_CACHE = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutos de vida para o cache
+const MAX_CACHE_SIZE = 1000; // Proteção contra estouro de RAM
+
+function cleanCache() {
+  const now = Date.now();
+  for (const [key, value] of AUTH_CACHE.entries()) {
+    if (now > value.expiresAt) AUTH_CACHE.delete(key);
+  }
+}
+
+// Limpeza automática a cada 10 minutos
+setInterval(cleanCache, 10 * 60 * 1000);
 
 export async function tinfoilAuth(req, res, next) {
   let user = null;
   let pass = null;
 
-  // 1. Tenta pegar do Header (Padrão HTTP Basic)
+  // 1. EXTRAÇÃO DE CREDENCIAIS (Header ou Query)
   const authHeader = req.headers.authorization;
+
   if (authHeader && /Basic/i.test(authHeader)) {
-    const credentials = authHeader.split(" ")[1];
     try {
+      const credentials = authHeader.split(" ")[1];
       const decoded = Buffer.from(credentials, "base64").toString().split(":");
       user = decoded[0];
       pass = decoded[1];
     } catch (e) {
-      console.error("[AUTH] Erro ao decodificar header:", e.message);
+      // Falha silenciosa no decode, segue para query
     }
   }
 
-  // 2. Tenta pegar da URL (Fallback "Blindado" para Tinfoil)
-  // Ex: /api?u=lucas&p=123456
+  // Fallback para URL params (?u=...&p=...)
   if (!user && req.query.u && req.query.p) {
     user = req.query.u;
     pass = req.query.p;
-    console.log(`[AUTH] 📍 Credenciais via URL: ${user}`);
   }
 
-  // 3. Se não achou credenciais em lugar nenhum
+  // 2. REJEIÇÃO RÁPIDA (Sem credenciais)
   if (!user || !pass) {
-    console.log(`[AUTH] ⚠️ Acesso sem credenciais: ${req.ip}`);
-    // Importante: NÃO retornamos 401 puro se tiver parâmetro de URL falho,
-    // pois o Tinfoil pode travar. Retornamos erro JSON direto.
+    // Retornamos JSON direto. HTML trava o Tinfoil.
     return res.status(401).json({
-      error:
-        "Autenticação Necessária. Use user/pass no Tinfoil ou ?u=user&p=pass na URL.",
+      error: "Mana Shop: Autenticação necessária (User/Pass)",
     });
   }
 
-  // 4. Valida no Banco de Dados
+  // Normaliza usuário para evitar duplicidade no cache
+  const normalizedUser = user.toLowerCase().trim();
+  const cacheKey = `${normalizedUser}:${pass}`;
+  const now = Date.now();
+
+  // 3. VERIFICAÇÃO NO CACHE (RAM - Ultra Rápido)
+  if (AUTH_CACHE.has(cacheKey)) {
+    const cached = AUTH_CACHE.get(cacheKey);
+
+    // Se o cache ainda é válido
+    if (now < cached.expiresAt) {
+      if (cached.valid) {
+        return next(); // ✅ SUCESSO (Cache)
+      } else {
+        return res
+          .status(403)
+          .json({ error: cached.errorReason || "Acesso Negado (Cache)" });
+      }
+    } else {
+      // Cache expirou, remove para consultar DB novamente
+      AUTH_CACHE.delete(cacheKey);
+    }
+  }
+
+  // 4. VALIDAÇÃO NO BANCO DE DADOS (Lento - Apenas se não tiver cache)
   try {
-    // Busca usuário (case insensitive para user)
     const foundUser = await User.findOne({
-      tinfoilUser: user.toLowerCase(),
+      tinfoilUser: normalizedUser,
       tinfoilPass: pass,
-    });
+    }).lean(); // .lean() é mais rápido, retorna JSON puro sem métodos do Mongoose
+
+    // Lógica de Validação
+    let isValid = false;
+    let errorReason = "Credenciais Inválidas";
 
     if (foundUser) {
       if (foundUser.isApproved) {
-        console.log(`[AUTH] ✅ Acesso autorizado: ${user}`);
-        next(); // ✅ SUCESSO
+        isValid = true;
       } else {
-        console.log(`[AUTH] 🚫 Usuário pendente: ${user}`);
-        res.status(403).json({ error: "Conta aguardando aprovação." });
+        errorReason = "Conta aguardando aprovação do admin";
       }
+    }
+
+    // 5. SALVA NO CACHE
+    // Se o cache estiver cheio, limpa o mais antigo (simples)
+    if (AUTH_CACHE.size >= MAX_CACHE_SIZE) AUTH_CACHE.clear();
+
+    AUTH_CACHE.set(cacheKey, {
+      valid: isValid,
+      errorReason: isValid ? null : errorReason,
+      expiresAt: now + CACHE_TTL,
+    });
+
+    // 6. RESPOSTA FINAL
+    if (isValid) {
+      console.log(`[AUTH] ✅ Login (DB): ${normalizedUser}`);
+      next();
     } else {
-      console.log(`[AUTH] 🚫 Credenciais inválidas: ${user}`);
-      res.status(401).json({ error: "Credenciais Inválidas" });
+      console.log(
+        `[AUTH] 🚫 Bloqueio (DB): ${normalizedUser} - ${errorReason}`
+      );
+      res.status(403).json({ error: errorReason });
     }
   } catch (err) {
-    console.error("[AUTH] Erro DB:", err);
-    res.status(500).json({ error: "Erro interno" });
+    console.error(`[AUTH] ❌ Erro Crítico DB: ${err.message}`);
+    // Em caso de erro no DB, não negamos direto, retornamos 500 para o Tinfoil tentar de novo
+    res.status(500).json({
+      error: "Erro interno no servidor de autenticação",
+    });
   }
 }
