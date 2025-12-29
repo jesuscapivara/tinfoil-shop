@@ -93,25 +93,30 @@ export async function createUser(email, webPassword, isAdmin = false) {
     }
   }
 
-  const tinfoilPass = Math.random().toString(36).slice(-6).toUpperCase(); // 6 caracteres
+  // ✅ Gera senha Tinfoil em texto plano (apenas para retornar no email)
+  const tinfoilPassPlain = Math.random().toString(36).slice(-6).toUpperCase(); // 6 caracteres
 
   try {
-    // Hash da senha com bcrypt
+    // Hash das senhas com bcrypt
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(webPassword, salt);
+    const tinfoilPassHash = await bcrypt.hash(tinfoilPassPlain, salt); // ✅ Hash da senha Tinfoil
 
     const user = new User({
       email,
-      password: hashedPassword, // ✅ Senha hasheada com bcrypt
+      password: hashedPassword, // ✅ Senha web hasheada com bcrypt
       isAdmin,
       isApproved: isAdmin, // Se for admin, já nasce aprovado. Se for user, nasce pendente.
       tinfoilUser,
-      tinfoilPass,
+      tinfoilPass: tinfoilPassHash, // ✅ Senha Tinfoil hasheada (nunca salva texto plano)
     });
     await user.save();
     console.log(
       `[DB] ✅ Usuário criado: ${email} → tinfoilUser: ${tinfoilUser}`
     );
+
+    // ✅ Retorna a senha plain apenas para o email, nunca salva no banco
+    user.tinfoilPassPlain = tinfoilPassPlain;
     return user;
   } catch (err) {
     console.error("[DB] Erro ao criar usuário:", err.message);

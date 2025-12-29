@@ -4,11 +4,9 @@ import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import jwt from "jsonwebtoken";
-import manaBridge from "./manaBridge.js";
+import manaBridge, { requireAuth } from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
-import { User } from "./database.js";
 
 // ES Modules __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -16,49 +14,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-const ADMIN_PASS = process.env.ADMIN_PASS;
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  process.env.ADMIN_PASS ||
-  "CHANGE_THIS_SECRET_IN_PRODUCTION"; // ⚠️ Use variável de ambiente segura
-
-// ✅ Função de autenticação JWT para rotas /bridge/*
-const requireAuth = async (req, res, next) => {
-  const cookies = req.headers.cookie || "";
-  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-  let token = tokenMatch ? tokenMatch[1] : null;
-
-  if (token) {
-    try {
-      token = decodeURIComponent(token);
-    } catch (e) {}
-
-    // ✅ Verifica token JWT
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-
-      // Se for admin
-      if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
-        req.user = decoded;
-        return next();
-      }
-
-      // Se for usuário comum
-      if (decoded.role === "user" && decoded.id) {
-        const user = await User.findById(decoded.id);
-        if (user && user.isApproved) {
-          req.user = decoded;
-          return next();
-        }
-      }
-    } catch (err) {
-      // Token inválido ou expirado
-    }
-  }
-
-  res.status(401).json({ error: "Não autorizado" });
-};
+// ✅ requireAuth já foi importado acima do manaBridge.js (DRY - Don't Repeat Yourself)
 
 const PORT = process.env.PORT || 8080;
 const ROOT_GAMES_FOLDER = "/Games_Switch";
@@ -238,12 +194,13 @@ async function buildGameIndex() {
     await saveGameCache(cachedGames);
 
     log.info(`✅ INDEXAÇÃO CONCLUÍDA! ${cachedGames.length} jogos.`);
-    isIndexing = false;
     indexingProgress = "Concluído";
   } catch (e) {
     log.error("FALHA INDEXAÇÃO:", e);
+    indexingProgress = `Erro: ${e.message || "Erro desconhecido"}`;
+  } finally {
+    // ✅ Garante que isIndexing sempre volta para false, mesmo se o mundo acabar
     isIndexing = false;
-    indexingProgress = "Erro";
   }
 }
 

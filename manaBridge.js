@@ -112,11 +112,15 @@ const getCookieOptions = () => ({
 });
 
 // --- MIDDLEWARE AUTH (JWT Seguro) ---
-const requireAuth = async (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   if (!ADMIN_EMAIL || !ADMIN_PASS) {
     return res
       .status(500)
       .send("Erro: Configure ADMIN_EMAIL e ADMIN_PASS no .env");
+  }
+
+  if (!JWT_SECRET) {
+    return res.status(500).send("Erro: Configure JWT_SECRET no .env");
   }
 
   const cookies = req.headers.cookie || "";
@@ -360,8 +364,17 @@ router.get("/bridge/users/pending", requireAuth, async (req, res) => {
 router.post("/bridge/users/approve/:id", requireAuth, async (req, res) => {
   const user = await approveUser(req.params.id);
   if (user) {
-    // Envia email de boas vindas com credenciais
-    sendApprovalEmail(user.email, user.tinfoilUser, user.tinfoilPass).catch(
+    // ✅ Gera nova senha Tinfoil (mais seguro que tentar recuperar a antiga)
+    const newTinfoilPass = Math.random().toString(36).slice(-6).toUpperCase();
+    const salt = await bcrypt.genSalt(10);
+    const tinfoilPassHash = await bcrypt.hash(newTinfoilPass, salt);
+
+    // Atualiza a senha no banco
+    user.tinfoilPass = tinfoilPassHash;
+    await user.save();
+
+    // Envia email de boas vindas com credenciais (usa a senha plain gerada)
+    sendApprovalEmail(user.email, user.tinfoilUser, newTinfoilPass).catch(
       console.error
     );
     res.json({ success: true });

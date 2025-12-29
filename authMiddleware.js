@@ -1,4 +1,5 @@
 import { User } from "./database.js";
+import bcrypt from "bcryptjs";
 
 /**
  * CACHE DE AUTENTICAÇÃO (HOT CACHE)
@@ -77,9 +78,9 @@ export async function tinfoilAuth(req, res, next) {
 
   // 4. VALIDAÇÃO NO BANCO DE DADOS (Lento - Apenas se não tiver cache)
   try {
+    // ✅ Busca APENAS pelo usuário (que é único)
     const foundUser = await User.findOne({
       tinfoilUser: normalizedUser,
-      tinfoilPass: pass,
     }).lean(); // .lean() é mais rápido, retorna JSON puro sem métodos do Mongoose
 
     // Lógica de Validação
@@ -87,10 +88,15 @@ export async function tinfoilAuth(req, res, next) {
     let errorReason = "Credenciais Inválidas";
 
     if (foundUser) {
-      if (foundUser.isApproved) {
-        isValid = true;
-      } else {
-        errorReason = "Conta aguardando aprovação do admin";
+      // ✅ Compara a senha enviada (pass) com o hash do banco
+      const passMatch = await bcrypt.compare(pass, foundUser.tinfoilPass);
+
+      if (passMatch) {
+        if (foundUser.isApproved) {
+          isValid = true;
+        } else {
+          errorReason = "Conta aguardando aprovação do admin";
+        }
       }
     }
 
