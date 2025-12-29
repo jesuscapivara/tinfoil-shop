@@ -488,21 +488,34 @@ function safeDestroyTorrent(torrent) {
   // Executa no próximo ciclo do processador para evitar conflito
   setTimeout(() => {
     try {
-      // Tenta remover pelo cliente usando o HASH (String) e não o Objeto
-      if (torrent.infoHash && client.get(torrent.infoHash)) {
-        client.remove(torrent.infoHash, { destroyStore: true }, (err) => {
-          if (err)
-            console.error(
-              "[SAFE-DESTROY] Erro ao remover cliente:",
-              err.message
-            );
-        });
-      } else if (!torrent.destroyed) {
+      // Verifica se o torrent já foi destruído
+      if (torrent.destroyed) {
+        return; // Já foi destruído, não precisa fazer nada
+      }
+
+      // Apenas tenta destruir o torrent diretamente
+      // O torrent.destroy() já remove do client automaticamente, então não precisamos chamar client.remove() separadamente
+      // Isso evita o erro "No torrent with id" que acontece quando tentamos remover um torrent que já foi removido
+      try {
         torrent.destroy({ destroyStore: true });
+      } catch (destroyErr) {
+        // Ignora erro se já foi destruído ou não existe
+        // Não loga erros esperados (torrent já destruído, não existe, etc)
+        const errorMsg = destroyErr.message || String(destroyErr);
+        if (
+          !errorMsg.includes("already destroyed") &&
+          !errorMsg.includes("destroyed") &&
+          !errorMsg.includes("No torrent with id")
+        ) {
+          console.log(`[SAFE-DESTROY] Erro ao destruir torrent: ${errorMsg}`);
+        }
       }
     } catch (err) {
       // Engole o erro silenciosamente para não derrubar o servidor
-      console.log(`[SAFE-DESTROY] Erro suprimido: ${err.message}`);
+      // Mas só se não for o erro crítico de "No torrent with id"
+      if (!err.message.includes("No torrent with id")) {
+        console.log(`[SAFE-DESTROY] Erro suprimido: ${err.message}`);
+      }
     }
   }, 100);
 }
@@ -1454,7 +1467,7 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
       if (previewTorrent) {
         try {
           safeDestroyTorrent(previewTorrent);
-          client.remove(previewTorrent);
+          // safeDestroyTorrent já faz a limpeza completa, não precisa chamar client.remove novamente
         } catch (e) {
           // Ignora erros ao remover
         }
@@ -1549,7 +1562,6 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
         setTimeout(() => {
           try {
             safeDestroyTorrent(torrent);
-            client.remove(torrent);
           } catch (e) {
             // Ignora erros ao remover
           }
@@ -1565,7 +1577,7 @@ router.post("/bridge/preview", requireAuth, async (req, res) => {
         try {
           if (previewTorrent) {
             safeDestroyTorrent(previewTorrent);
-            client.remove(previewTorrent);
+            // safeDestroyTorrent já faz a limpeza completa, não precisa chamar client.remove novamente
           }
         } catch (e) {
           // Ignora erros ao remover
