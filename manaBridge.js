@@ -308,7 +308,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
       isApproved: true,
       tinfoilUser: "admin",
       tinfoilPass: "admin", // Admin não usa tinfoil, usa o .env se quiser
-      host: DOMAIN,
+      host: `${DOMAIN}/api`,
       protocol: "https",
     });
   }
@@ -325,7 +325,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
         isApproved: user.isApproved,
         tinfoilUser: user.tinfoilUser,
         tinfoilPass: user.tinfoilPass,
-        host: DOMAIN,
+        host: `${DOMAIN}/api`,
         protocol: "https",
       });
     } else {

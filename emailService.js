@@ -8,24 +8,51 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Configura o transportador com suas variáveis de ambiente
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: false, // true para 465, false para outras portas
-  auth: {
-    user: process.env.SMTP_USER, // Seu email (ex: capivara@rossetti...)
-    pass: process.env.SMTP_PASS, // Sua senha de app
-  },
-});
-
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT) || 587;
+
+// Verifica se as credenciais SMTP estão configuradas
+const isEmailConfigured = SMTP_USER && SMTP_PASS;
+
+// Configura o transportador apenas se as credenciais existirem
+let transporter = null;
+if (isEmailConfigured) {
+  try {
+    transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: false, // true para 465, false para outras portas
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS,
+      },
+    });
+    console.log("[EMAIL] ✅ Serviço de e-mail configurado");
+  } catch (e) {
+    console.error("[EMAIL] ❌ Erro ao configurar transporter:", e.message);
+  }
+} else {
+  console.log("[EMAIL] ⚠️ SMTP não configurado. E-mails não serão enviados.");
+  console.log(
+    "[EMAIL] ⚠️ Configure SMTP_USER e SMTP_PASS no .env para habilitar."
+  );
+}
 
 export async function sendNewUserAlert(newUserEmail) {
+  if (!transporter || !isEmailConfigured) {
+    console.log(
+      `[EMAIL] ⚠️ E-mail não enviado (SMTP não configurado). Novo usuário: ${newUserEmail}`
+    );
+    return;
+  }
+
   try {
     await transporter.sendMail({
-      from: `"Mana Shop" <${process.env.SMTP_USER}>`,
+      from: `"Mana Shop" <${SMTP_USER}>`,
       to: ADMIN_EMAIL,
       subject: "🔔 Novo Usuário Aguardando Aprovação",
       html: `
@@ -41,9 +68,19 @@ export async function sendNewUserAlert(newUserEmail) {
 }
 
 export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
+  if (!transporter || !isEmailConfigured) {
+    console.log(
+      `[EMAIL] ⚠️ E-mail não enviado (SMTP não configurado). Usuário aprovado: ${userEmail}`
+    );
+    console.log(
+      `[EMAIL] ⚠️ Credenciais Tinfoil: User=${tinfoilUser} Pass=${tinfoilPass}`
+    );
+    return;
+  }
+
   try {
     await transporter.sendMail({
-      from: `"Mana Shop" <${process.env.SMTP_USER}>`,
+      from: `"Mana Shop" <${SMTP_USER}>`,
       to: userEmail,
       subject: "✅ Seu acesso foi APROVADO!",
       html: `
@@ -53,7 +90,7 @@ export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
                     <hr>
                     <h3>Suas Credenciais Tinfoil:</h3>
                     <p><b>Protocol:</b> https</p>
-                    <p><b>Host:</b> ${DOMAIN}</p>
+                    <p><b>Host:</b> ${DOMAIN}/api</p>
                     <p><b>Username:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilUser}</code></p>
                     <p><b>Password:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilPass}</code></p>
                     <hr>
