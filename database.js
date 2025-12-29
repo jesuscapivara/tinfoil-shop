@@ -41,6 +41,59 @@ export function isDBConnected() {
 // SCHEMAS & MODELS
 // ═══════════════════════════════════════════════
 
+// 1. NOVO SCHEMA DE USUÁRIO
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true }, // Senha do painel web
+  isAdmin: { type: Boolean, default: false },
+  
+  // Credenciais geradas para o Tinfoil
+  tinfoilUser: { type: String, required: true, unique: true },
+  tinfoilPass: { type: String, required: true },
+  
+  createdAt: { type: Date, default: Date.now }
+});
+
+export const User = mongoose.model("User", userSchema);
+
+export async function createUser(email, webPassword, isAdmin = false) {
+  if (!isConnected) return null;
+
+  // Gera credenciais Tinfoil
+  const tinfoilUser = email
+    .split("@")[0]
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+  const tinfoilPass = Math.random().toString(36).slice(-8).toUpperCase(); // Ex: X7K9P2M1
+
+  try {
+    const user = new User({
+      email,
+      password: webPassword, // Em produção real, use bcrypt. Aqui vamos simples.
+      isAdmin,
+      tinfoilUser,
+      tinfoilPass,
+    });
+    await user.save();
+    return user;
+  } catch (err) {
+    console.error("[DB] Erro ao criar usuário:", err.message);
+    return null;
+  }
+}
+
+export async function findUserByEmail(email) {
+  if (!isConnected) return null;
+  return await User.findOne({ email });
+}
+
+export async function validateTinfoilCredentials(user, pass) {
+  if (!isConnected) return false;
+  // Verifica se existe alguém com esse user/pass do Tinfoil
+  const found = await User.findOne({ tinfoilUser: user, tinfoilPass: pass });
+  return !!found;
+}
+
 // Schema para histórico de downloads
 const downloadHistorySchema = new mongoose.Schema({
   name: { type: String, required: true },

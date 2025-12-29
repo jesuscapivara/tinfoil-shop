@@ -123,6 +123,26 @@ const requireAuth = (req, res, next) => {
   }
 };
 
+// ROTA DE REGISTRO (Nova)
+router.post("/bridge/register", async (req, res) => {
+  const { email, password, inviteCode } = req.body;
+  
+  // Opcional: Sistema simples de código de convite para não entrar qualquer um
+  if (inviteCode !== "CAPIVARA2025") { 
+      return res.status(403).json({ error: "Código de convite inválido" });
+  }
+
+  const existing = await findUserByEmail(email);
+  if (existing) return res.status(400).json({ error: "Email já cadastrado" });
+
+  const newUser = await createUser(email, password, false); // false = não é admin
+  if (newUser) {
+      res.json({ success: true });
+  } else {
+      res.status(500).json({ error: "Erro ao criar usuário" });
+  }
+});
+
 // --- ROTAS DE AUTENTICAÇÃO ---
 router.get("/admin/login", (req, res) => {
   const cookies = req.headers.cookie || "";
@@ -133,23 +153,39 @@ router.get("/admin/login", (req, res) => {
   res.send(loginTemplate());
 });
 
-router.post("/bridge/auth", (req, res) => {
+router.post("/bridge/auth", async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email e senha são obrigatórios" });
+  // 1. Verifica se é o Admin Supremo (.env)
+  if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
+    const token = Buffer.from(`admin:${ADMIN_PASS}`).toString("base64");
+    res.cookie("auth_token", token, getCookieOptions());
+    return res.json({ success: true, redirect: "/admin" });
   }
 
-  if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
-    res.cookie(
-      "auth_token",
-      generateToken(email, password),
-      getCookieOptions()
-    );
-    res.json({ success: true, redirect: "/admin" });
-  } else {
-    res.status(401).json({ error: "Credenciais inválidas" });
+  // 2. Verifica se é usuário normal (MongoDB)
+  const user = await findUserByEmail(email);
+  if (user && user.password === password) {
+    // Token diferente para usuários normais
+    const token = Buffer.from(`user:${user._id}`).toString("base64");
+    res.cookie("auth_token", token, getCookieOptions());
+    return res.json({ success: true, redirect: "/admin" });
   }
+
+  res.status(401).json({ error: "Credenciais inválidas" });
+});
+
+// ROTA PARA OBTER DADOS DO USUÁRIO (Para o Dashboard)
+router.get("/bridge/me", requireAuth, async (req, res) => {
+    // Lógica para pegar o usuário do cookie
+    // Se for user, busca no banco e retorna tinfoilUser/tinfoilPass
+    // ...
+    res.json({ 
+        user: "olucasrossetti", 
+        pass: "X7K9P2", 
+        host: "capivara.rossetti.eng.br",
+        protocol: "https"
+    });
 });
 
 router.get("/admin/logout", (req, res) => {

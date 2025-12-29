@@ -206,6 +206,58 @@ export function dashboardTemplate() {
         }
         .logout:hover { color: var(--error); }
         
+        /* Credentials Box */
+        .credentials-box {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border: 1px solid var(--primary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(99, 102, 241, 0.15);
+        }
+        .credentials-box h3 {
+            margin-top: 0;
+            color: var(--white);
+            margin-bottom: 15px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        .cred-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .cred-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+        .cred-item label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+        .cred-item code {
+            color: var(--cyan);
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 1rem;
+            font-weight: bold;
+            display: block;
+            word-break: break-all;
+        }
+        .cred-footer {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: right;
+            font-style: italic;
+        }
+        
         /* Index Status Box */
         .index-status {
             background: var(--card);
@@ -664,6 +716,31 @@ export function dashboardTemplate() {
                 <a href="/admin/logout" class="logout">Sair</a>
             </div>
         </header>
+
+        <div class="credentials-box">
+            <h3>🔑 Suas Credenciais Tinfoil</h3>
+            <div class="cred-grid">
+                <div class="cred-item">
+                    <label>Protocol</label>
+                    <code>https</code>
+                </div>
+                <div class="cred-item">
+                    <label>Host</label>
+                    <code>capivara.rossetti.eng.br</code>
+                </div>
+                <div class="cred-item">
+                    <label>Username</label>
+                    <code id="tf-user">Carregando...</code>
+                </div>
+                <div class="cred-item">
+                    <label>Password</label>
+                    <code id="tf-pass">Carregando...</code>
+                </div>
+            </div>
+            <div class="cred-footer">
+                Configure isso na aba "File Browser" do seu Switch.
+            </div>
+        </div>
 
         <div class="index-status">
             <div class="index-info">
@@ -1186,7 +1263,27 @@ export function dashboardTemplate() {
             }
         }
         
+        // ═══════════════════════════════════════════════
+        // CREDENTIALS LOADER
+        // ═══════════════════════════════════════════════
+        
+        async function loadCredentials() {
+            try {
+                const res = await fetch('/bridge/me', { credentials: 'include' });
+                if (res.status === 401) return window.location.href = '/admin/login';
+                
+                const data = await res.json();
+                document.getElementById('tf-user').textContent = data.user || 'N/A';
+                document.getElementById('tf-pass').textContent = data.pass || 'N/A';
+            } catch(e) {
+                console.error('Erro ao carregar credenciais:', e);
+                document.getElementById('tf-user').textContent = 'Erro';
+                document.getElementById('tf-pass').textContent = 'Erro';
+            }
+        }
+        
         // Carrega status inicial e atualiza a cada 2 segundos
+        loadCredentials();
         loadIndexStatus();
         setInterval(loadIndexStatus, 2000);
     </script>

@@ -4,6 +4,7 @@ import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import manaBridge from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
+import { tinfoilAuth } from "./authMiddleware.js";
 
 dotenv.config();
 
@@ -28,6 +29,8 @@ app.enable("trust proxy");
 
 app.use(express.json()); // Necessário para ler o JSON do magnet link
 app.use(manaBridge);
+app.use("/api", tinfoilAuth);
+app.use("/download", tinfoilAuth);
 
 // --- ESTADO GLOBAL DO SERVIDOR ---
 let cachedGames = [];
