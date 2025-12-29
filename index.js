@@ -4,7 +4,7 @@ import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import manaBridge, { requireAuth } from "./manaBridge.js";
+import manaBridge, { requireAuth, bridgeEvents } from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
 
@@ -311,6 +311,13 @@ app.get("/indexing-status", (req, res) => {
 // Endpoint para o Dashboard (Site)
 app.get("/bridge/games", requireAuth, (req, res) => {
   res.json({ games: cachedGames });
+});
+
+// ✅ Sistema de Eventos: "Ouvido" para sincronização automática
+// Quando o bridge gritar, a gente recarrega o cache do banco para a RAM
+bridgeEvents.on("new_game_indexed", async () => {
+  log.info("🔔 Notificação recebida: Recarregando cache em memória...");
+  await refreshCacheFromDB();
 });
 
 // --- STARTUP ---

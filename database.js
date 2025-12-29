@@ -390,3 +390,42 @@ export async function getMeta(key) {
     return null;
   }
 }
+
+// ═══════════════════════════════════════════════
+// VERIFICAÇÃO DE DUPLICATAS (Guard Rail)
+// ═══════════════════════════════════════════════
+
+/**
+ * Verifica se um jogo já existe no banco para evitar duplicatas.
+ * Retorna o objeto do jogo se encontrar, ou null se estiver livre.
+ */
+export async function checkGameExists(filename, titleId, version) {
+  if (!isConnected) return null;
+
+  try {
+    // 1. Proteção contra Sobrescrita (Mesmo nome de arquivo)
+    // Isso evita corromper o arquivo que já está no Dropbox
+    const byFilename = await GameCache.findOne({ filename: filename });
+    if (byFilename) {
+      return { type: "filename", found: byFilename };
+    }
+
+    // 2. Proteção contra Duplicidade Lógica (Mesmo Jogo e Versão)
+    // Se já temos o TitleID na mesma versão, não precisamos baixar de novo
+    // (Só verificamos se titleId for válido)
+    if (titleId) {
+      const byId = await GameCache.findOne({
+        titleId: titleId,
+        version: version,
+      });
+      if (byId) {
+        return { type: "logic", found: byId };
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error("[DB] Erro ao verificar duplicidade:", err.message);
+    return null; // Em caso de erro, deixamos passar (fail open)
+  }
+}

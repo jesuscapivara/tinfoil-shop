@@ -6,12 +6,17 @@ import dotenv from "dotenv";
 import multer from "multer";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import { EventEmitter } from "events";
 import { loginView } from "./frontend/views/login.js";
 import { dashboardView } from "./frontend/views/dashboard.js";
+
+// ✅ Sistema de Eventos: "Megafone" para comunicação entre módulos
+export const bridgeEvents = new EventEmitter();
 import {
   saveDownloadHistory,
   getDownloadHistory,
   addOrUpdateGame,
+  checkGameExists,
 } from "./database.js";
 import {
   createUser,
@@ -498,7 +503,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
     const torrentInstance = client.add(
       torrentInput,
       { path: "/tmp" },
-      (torrent) => {
+      async (torrent) => {
         // Armazena referência do torrent para cancelamento (tanto a instância quanto o objeto)
         activeDownloads[id].torrent = torrent;
         activeDownloads[id].torrentInstance = torrentInstance;
@@ -528,6 +533,43 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           f.name.match(/\.(nsp|nsz|xci)$/i)
         );
         log(`🎮 Arquivos de jogo encontrados: ${gameFiles.length}`, "TORRENT");
+
+        // =================================================================
+        // 🛡️ SECURITY CHECK: DETECÇÃO DE DUPLICATAS
+        // =================================================================
+        for (const file of gameFiles) {
+          // Usa o parser que já importamos para extrair ID e Versão
+          const meta = parseGameInfo(file.name);
+
+          // Consulta o banco
+          const duplicate = await checkGameExists(
+            file.name,
+            meta.id,
+            meta.version
+          );
+
+          if (duplicate) {
+            const reason =
+              duplicate.type === "filename"
+                ? `Arquivo já existe: ${file.name}`
+                : `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+
+            log(`🚫 BLOQUEADO: ${reason}`, "DUPLICATE");
+
+            // Marca erro no status para o usuário ver
+            activeDownloads[id].phase = "error";
+            activeDownloads[id].error = `Duplicado! ${reason}`;
+            activeDownloads[id].name = file.name; // Atualiza nome para ficar claro quem falhou
+
+            // Destrói o torrent imediatamente para não baixar nada
+            torrent.destroy();
+
+            // Remove da lista ativa após 5s
+            setTimeout(() => onDownloadComplete(id), 5000);
+            return; // 🛑 PARA TUDO AQUI
+          }
+        }
+        // =================================================================
 
         // Calcula tamanho total dos jogos
         const totalGameSize = gameFiles.reduce((acc, f) => acc + f.length, 0);
@@ -701,6 +743,11 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
                     filename: file.name,
                     path: destPath.toLowerCase(), // Importante para upsert funcionar
                   });
+
+                  // 🔥 O PULO DO GATO ESTÁ AQUI:
+                  // Avisa o sistema que houve atualização!
+                  bridgeEvents.emit("new_game_indexed");
+                  log(`   🔔 Evento de atualização disparado!`, "EVENT");
                 }
               } catch (idxErr) {
                 // Não paramos o fluxo se a indexação falhar, apenas logamos
