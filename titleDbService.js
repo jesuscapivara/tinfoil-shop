@@ -1,72 +1,126 @@
 /**
- * SERVICE: TitleDB & Parser
- * Inteligência de reconhecimento via CNMTS (Fonte mais estável)
+ * SERVICE: TitleDB Aggregator
+ * Arquitetura: Consumo de Raw Data (Multi-Region / Multi-Source)
+ * Baseado na lógica de agregação do Blawar/Tinfoil.
  */
 
 import fetch from "isomorphic-fetch";
 
-// ✅ FONTE ESTÁVEL: CNMTS.json (Mapeia ID -> Metadados)
-// Esse arquivo é mantido pois é essencial para ferramentas como NSC_Builder
-const TITLEDB_URL =
-  "https://raw.githubusercontent.com/julesontheroad/titledb/master/cnmts.json";
+// Fontes de Verdade (Raw Data)
+// ⚠️ Nota: Usamos tinfoil.media como primário pois o github do blawar removeu os arquivos .json
+const SOURCES = [
+  {
+    id: "US_EN",
+    url: "https://tinfoil.media/titledb/titles.US.en.json",
+    headers: { "User-Agent": "Tinfoil/17.0" }, // Necessário para passar no WAF
+    priority: 1,
+  },
+  {
+    id: "JP_JA",
+    url: "https://tinfoil.media/titledb/titles.JP.ja.json",
+    headers: { "User-Agent": "Tinfoil/17.0" },
+    priority: 2,
+  },
+  // Fallback Mirror (caso o oficial caia)
+  {
+    id: "MIRROR_US",
+    url: "https://raw.githubusercontent.com/julesontheroad/titledb/master/titles.US.en.json",
+    priority: 3,
+  },
+];
 
-// Cache em memória
-let titleDbMap = new Map(); // Nome -> ID
-let idToNameMap = new Map(); // ID -> Nome (Opcional, para debug)
+// O "Cérebro" unificado na memória RAM (Mais rápido que FS no Discloud)
+let titleDbMap = new Map();
 
 const log = {
-  info: (msg) => console.log(`[BRAIN] ${msg}`),
-  error: (msg, err) => console.error(`[BRAIN] ❌ ${msg}`, err || ""),
+  info: (msg) => console.log(`[AGGREGATOR] ${msg}`),
+  error: (msg, err) => console.error(`[AGGREGATOR] ❌ ${msg}`, err || ""),
+  warn: (msg) => console.log(`[AGGREGATOR] ⚠️ ${msg}`),
 };
 
 /**
- * Normaliza nomes para busca (remove espaços, simbolos, lowercase)
+ * Normaliza strings para chave de busca (remove espaços, simbolos)
  */
 function normalize(str) {
+  if (!str) return "";
   return str.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/**
+ * Motor de Agregação Paralela
+ */
 export async function loadTitleDB() {
-  log.info(`Baixando Cérebro de: ${TITLEDB_URL}...`);
-  try {
-    const res = await fetch(TITLEDB_URL);
-    if (!res.ok)
-      throw new Error(
-        `Status ${res.status} - O arquivo pode ter mudado de lugar.`
-      );
+  console.time("AggregationTime");
+  log.info(`🚀 Iniciando agregação de ${SOURCES.length} bases de dados...`);
 
-    const json = await res.json();
-    titleDbMap.clear();
-    idToNameMap.clear();
+  titleDbMap.clear();
 
-    // O formato do cnmts.json é:
-    // { "0100000000010000": { "name": "Super Mario Odyssey", ... }, ... }
+  // Dispara requests em paralelo (non-blocking)
+  const promises = SOURCES.map(async (source) => {
+    try {
+      const res = await fetch(source.url, { headers: source.headers || {} });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return { source: source.id, data, priority: source.priority };
+    } catch (err) {
+      log.warn(`Falha na fonte ${source.id}: ${err.message}`);
+      return null;
+    }
+  });
 
-    let count = 0;
-    for (const [id, data] of Object.entries(json)) {
-      if (data && data.name) {
-        const cleanName = normalize(data.name);
+  const results = await Promise.all(promises);
+  let totalProcessed = 0;
 
-        // Mapeia Nome -> ID (para quando o arquivo não tem ID)
-        titleDbMap.set(cleanName, id);
+  // Processamento e Normalização (Merge Strategy)
+  // Ordenamos por prioridade para que US_EN sobrescreva JP_JA em caso de conflito de nomes
+  results
+    .filter((r) => r !== null)
+    .sort((a, b) => a.priority - b.priority)
+    .forEach((result) => {
+      const { data, source } = result;
+      let entries = [];
 
-        // Se quiser mapear também variações (ex: remove "The")
-        if (cleanName.startsWith("the")) {
-          titleDbMap.set(cleanName.substring(3), id);
+      // Detecta formato (Array vs Object)
+      if (Array.isArray(data)) {
+        entries = data;
+      } else if (typeof data === "object") {
+        entries = Object.values(data);
+      }
+
+      log.info(`📦 Processando ${source}: ${entries.length} registros.`);
+
+      entries.forEach((game) => {
+        if (!game.id || !game.name) return;
+
+        // Estratégia de Indexação Dupla para Auto-Discovery
+
+        // 1. Chave Normalizada (ex: "supermarioodyssey")
+        const cleanName = normalize(game.name);
+        if (cleanName) {
+          // Só sobrescreve se ainda não existe (prioridade para a primeira fonte)
+          if (!titleDbMap.has(cleanName)) {
+            titleDbMap.set(cleanName, game.id);
+          }
         }
 
-        // Mapeia ID -> Nome (para debug futuro)
-        idToNameMap.set(id, data.name);
+        // 2. Chave Exata Lowercase (ex: "super mario odyssey")
+        // Útil para matches parciais mais precisos
+        const exactName = game.name.toLowerCase();
+        if (!titleDbMap.has(exactName)) {
+          titleDbMap.set(exactName, game.id);
+        }
 
-        count++;
-      }
-    }
+        totalProcessed++;
+      });
+    });
 
-    log.info(`✅ Cérebro Ativo! ${count} jogos indexados via CNMTS.`);
-  } catch (e) {
-    log.error("Falha Crítica no TitleDB:", e.message);
+  console.timeEnd("AggregationTime");
+  log.info(`✅ Base unificada gerada na RAM!`);
+  log.info(`📊 Total de Títulos Indexados: ${titleDbMap.size}`);
+
+  if (titleDbMap.size === 0) {
     log.error(
-      "Sua loja funcionará apenas com jogos que já tenham [ID] no nome do arquivo."
+      "❌ AVISO: Nenhuma base de dados foi carregada. O Auto-Discovery não funcionará."
     );
   }
 }
@@ -74,11 +128,14 @@ export async function loadTitleDB() {
 export function getDbStatus() {
   return titleDbMap.size > 0
     ? `Online (${titleDbMap.size} títulos)`
-    : "Offline (Usando apenas nomes de arquivo)";
+    : "Offline (Mode File-Only)";
 }
 
+/**
+ * Parser Inteligente que consulta o DB Agregado
+ */
 export function parseGameInfo(fileName) {
-  // 1. Tenta pegar ID do nome do arquivo [0100...]
+  // 1. Tenta pegar ID explícito no nome [0100...]
   const regexId = /\[([0-9A-Fa-f]{16})\]/i;
   let titleId = null;
   const matchId = fileName.match(regexId);
@@ -90,7 +147,7 @@ export function parseGameInfo(fileName) {
   const matchVersion = fileName.match(regexVersion);
   if (matchVersion) version = parseInt(matchVersion[1], 10);
 
-  // 3. Limpa o nome visualmente
+  // 3. Limpeza do Nome
   let cleanName = fileName
     .replace(/\.(nsp|nsz|xci)$/i, "")
     .replace(regexId, "")
@@ -101,25 +158,18 @@ export function parseGameInfo(fileName) {
     .replace(/\s+/g, " ")
     .trim();
 
-  // 4. AUTO-DISCOVERY: Se não tem ID, busca no mapa
+  // 4. Consulta ao "Cérebro" Agregado
   if (!titleId && titleDbMap.size > 0) {
     const searchKey = normalize(cleanName);
 
     if (titleDbMap.has(searchKey)) {
       titleId = titleDbMap.get(searchKey);
-      // console.log(`[AUTO] Match encontrado: "${cleanName}" -> ${titleId}`);
     } else {
-      // Tentativa de "Fuzzy Match" simples (contém)
-      // Cuidado: pode ser lento se tiver muitos jogos, mas ajuda em nomes parciais
-      // Descomente se precisar de mais "força bruta"
-      /*
-      for (const [key, id] of titleDbMap.entries()) {
-        if (key.includes(searchKey) || searchKey.includes(key)) {
-           titleId = id;
-           break;
-        }
+      // Fallback: Tenta busca exata lowercase
+      const simpleKey = cleanName.toLowerCase();
+      if (titleDbMap.has(simpleKey)) {
+        titleId = titleDbMap.get(simpleKey);
       }
-      */
     }
   }
 
