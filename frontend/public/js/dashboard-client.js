@@ -720,6 +720,11 @@ function renderGames(games) {
 
       if (game.id) {
         // 🧠 A MÁGICA DOS IDS NINTENDO
+        // Padrão Nintendo Switch:
+        // - Jogo Base: termina em 000 (ex: 010073C01AF34000)
+        // - UPDATE: termina em 800 (ex: 010073C01AF34800)
+        // - DLC: termina em 001, 002, 003, etc. (ex: 010073C01AF35001, 010073C01AF35002)
+
         // Pega os últimos 3 caracteres
         const suffix = game.id.slice(-3).toUpperCase();
 
@@ -732,10 +737,11 @@ function renderGames(games) {
 
         // Lógica do Badge (Selo)
         if (suffix === "800") {
-          // UPDATE (Geralmente termina em 800)
+          // UPDATE: Termina em 800
           badgeHtml = `<span class="type-badge badge-upd">UPDATE</span>`;
-        } else if (suffix !== "000") {
-          // DLC (Termina em qualquer coisa que não seja 000 ou 800)
+        } else if (suffix !== "000" && /^[0-9A-F]{3}$/.test(suffix)) {
+          // DLC: Termina em qualquer número hexadecimal de 3 dígitos que não seja 000 ou 800
+          // Exemplos: 001, 002, 003, 004, 010, 0FF, etc.
           badgeHtml = `<span class="type-badge badge-dlc">DLC</span>`;
         }
         // Se for '000', é o jogo base, não precisa de selo.

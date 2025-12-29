@@ -9,13 +9,13 @@ export function dashboardView() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mana Shop | Dashboard</title>
+    <title>Capivara Shop | Dashboard</title>
     <link rel="stylesheet" href="/public/css/dashboard.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🎮 Mana Bridge <span class="badge">v6.0</span></h1>
+            <h1>🎮 Capivara Shop <span class="badge">v6.0</span></h1>
             <div class="header-actions">
                 <a href="/admin/logout" class="logout">Sair</a>
             </div>
