@@ -1,81 +1,63 @@
 import { validateTinfoilCredentials, User } from "./database.js";
 
-// Timeout para queries MongoDB (evita travamento)
-const DB_TIMEOUT = 5000; // 5 segundos
-
 export async function tinfoilAuth(req, res, next) {
+  let user = null;
+  let pass = null;
+
+  // 1. Tenta pegar do Header (Padrão HTTP Basic)
   const authHeader = req.headers.authorization;
-
-  // Se não tem header de autenticação, retorna 401 com WWW-Authenticate
-  if (!authHeader) {
-    console.log(`[AUTH] 🔒 Requisição sem credenciais: ${req.path}`);
-    return res
-      .status(401)
-      .set("WWW-Authenticate", 'Basic realm="Mana Shop"')
-      .json({
-        error: "Autenticação Necessária. Configure User/Senha no Tinfoil.",
-      });
+  if (authHeader && /Basic/i.test(authHeader)) {
+    const credentials = authHeader.split(" ")[1];
+    try {
+      const decoded = Buffer.from(credentials, "base64").toString().split(":");
+      user = decoded[0];
+      pass = decoded[1];
+    } catch (e) {
+      console.error("[AUTH] Erro ao decodificar header:", e.message);
+    }
   }
 
-  // Decoda Basic Auth (base64)
-  const [scheme, credentials] = authHeader.split(" ");
-  if (!/Basic/i.test(scheme)) {
-    console.log(`[AUTH] ❌ Scheme inválido: ${scheme}`);
-    return res
-      .status(401)
-      .set("WWW-Authenticate", 'Basic realm="Mana Shop"')
-      .json({ error: "Auth inválida" });
+  // 2. Tenta pegar da URL (Fallback "Blindado" para Tinfoil)
+  // Ex: /api?u=lucas&p=123456
+  if (!user && req.query.u && req.query.p) {
+    user = req.query.u;
+    pass = req.query.p;
+    console.log(`[AUTH] 📍 Credenciais via URL: ${user}`);
   }
 
-  let user, pass;
+  // 3. Se não achou credenciais em lugar nenhum
+  if (!user || !pass) {
+    console.log(`[AUTH] ⚠️ Acesso sem credenciais: ${req.ip}`);
+    // Importante: NÃO retornamos 401 puro se tiver parâmetro de URL falho,
+    // pois o Tinfoil pode travar. Retornamos erro JSON direto.
+    return res.status(401).json({
+      error:
+        "Autenticação Necessária. Use user/pass no Tinfoil ou ?u=user&p=pass na URL.",
+    });
+  }
+
+  // 4. Valida no Banco de Dados
   try {
-    [user, pass] = Buffer.from(credentials, "base64").toString().split(":");
-  } catch (e) {
-    console.log(`[AUTH] ❌ Erro ao decodificar credenciais`);
-    return res
-      .status(401)
-      .set("WWW-Authenticate", 'Basic realm="Mana Shop"')
-      .json({ error: "Credenciais inválidas" });
-  }
-
-  // Verifica credenciais E aprovação com timeout
-  try {
-    // Cria uma Promise com timeout
-    const findUserPromise = User.findOne({
-      tinfoilUser: user,
+    // Busca usuário (case insensitive para user)
+    const foundUser = await User.findOne({
+      tinfoilUser: user.toLowerCase(),
       tinfoilPass: pass,
     });
-
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout MongoDB")), DB_TIMEOUT)
-    );
-
-    const foundUser = await Promise.race([findUserPromise, timeoutPromise]);
 
     if (foundUser) {
       if (foundUser.isApproved) {
         console.log(`[AUTH] ✅ Acesso autorizado: ${user}`);
-        next(); // Sucesso
+        next(); // ✅ SUCESSO
       } else {
-        console.log(`[AUTH] 🚫 Usuário pendente tentou acessar: ${user}`);
-        return res.status(403).json({
-          error: "Conta aguardando aprovação do Admin.",
-        });
+        console.log(`[AUTH] 🚫 Usuário pendente: ${user}`);
+        res.status(403).json({ error: "Conta aguardando aprovação." });
       }
     } else {
       console.log(`[AUTH] 🚫 Credenciais inválidas: ${user}`);
-      // IMPORTANTE: Retorna WWW-Authenticate para o Tinfoil pedir senha novamente
-      return res
-        .status(401)
-        .set("WWW-Authenticate", 'Basic realm="Mana Shop"')
-        .json({ error: "Credenciais Inválidas" });
+      res.status(401).json({ error: "Credenciais Inválidas" });
     }
   } catch (err) {
-    console.error(`[AUTH] ❌ Erro ao verificar credenciais:`, err.message);
-    // Em caso de erro (timeout, etc), retorna 401 com WWW-Authenticate
-    return res
-      .status(401)
-      .set("WWW-Authenticate", 'Basic realm="Mana Shop"')
-      .json({ error: "Erro ao verificar credenciais. Tente novamente." });
+    console.error("[AUTH] Erro DB:", err);
+    res.status(500).json({ error: "Erro interno" });
   }
 }
