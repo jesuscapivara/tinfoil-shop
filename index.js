@@ -104,17 +104,16 @@ async function getDirectLink(path) {
   }
 }
 
-// 🔍 EXTRAÇÃO DE TITLE ID MELHORADA
+// 🔍 EXTRAÇÃO DE TITLE ID E VERSÃO (Melhorada)
 function parseGameInfo(fileName) {
-
   // Busca todos os matches de [16 caracteres hex]
-  const regex = /\[([0-9A-Fa-f]{16})\]/g;
+  const regexId = /\[([0-9A-Fa-f]{16})\]/g;
   let titleId = null;
   let match;
   const matches = [];
 
   // Coleta todos os matches primeiro
-  while ((match = regex.exec(fileName)) !== null) {
+  while ((match = regexId.exec(fileName)) !== null) {
     matches.push(match[1].toUpperCase());
   }
 
@@ -124,16 +123,27 @@ function parseGameInfo(fileName) {
     titleId = matches[0]; // Primeiro match é sempre o Title ID
   }
 
+  // --- LÓGICA DE VERSÃO ADICIONADA ---
+  // Captura [v12345] antes de remover do nome
+  // O Tinfoil precisa desse número inteiro para ordenar em "New Games" / "Updates"
+  let version = 0; // Default: 0 assume Base Game
+  const versionMatch = fileName.match(/\[v(\d+)\]/i);
+  if (versionMatch) {
+    version = parseInt(versionMatch[1], 10);
+  }
+  // ----------------------------------
+
   // Limpa o nome removendo [ID], (Size), v0, etc
   let cleanName = fileName
     .replace(/\.(nsp|nsz|xci)$/i, "") // Remove extensão
     .replace(/\[([0-9A-Fa-f]{16})\]/g, "") // Remove todos os IDs
     .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "") // Remove tamanho
-    .replace(/\[v[0-9]+\]/gi, "") // Remove versão [v589824]
+    .replace(/\[v[0-9]+\]/gi, "") // Remove a tag de versão visualmente
     .replace(/\s+/g, " ") // Normaliza espaços múltiplos
     .trim(); // Remove espaços finais
 
-  return { name: cleanName, id: titleId };
+  // Retorna também a versão
+  return { name: cleanName, id: titleId, version };
 }
 
 async function buildGameIndex() {
@@ -168,19 +178,21 @@ async function buildGameIndex() {
       const directUrl = await getDirectLink(file.path_lower);
       if (!directUrl) return null;
 
-      const { name, id } = parseGameInfo(file.name);
+      // Desestrutura a versão também
+      const { name, id, version } = parseGameInfo(file.name);
 
-      // Log para debug
-      if (id) {
-        log.info(`🎮 Jogo: ${name} | ID: ${id}`);
-      }
+      // Log para debug (reduzido para não poluir)
+      // if (id) {
+      //   log.info(`🎮 Jogo: ${name} | ID: ${id} | v${version}`);
+      // }
 
       // Retorna objeto formatado para Tinfoil
       return {
         url: directUrl,
-        size: file.size,
+        size: file.size, // Size em bytes (obrigatório para barra de progresso correta)
         name: name,
         id: id,
+        version: version, // ✅ CRÍTICO: Tinfoil usa isso para popular "New Games"
       };
     });
 
