@@ -1,4 +1,4 @@
-import { validateTinfoilCredentials } from "./database.js";
+import { validateTinfoilCredentials, User } from "./database.js";
 
 export async function tinfoilAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -18,17 +18,35 @@ export async function tinfoilAuth(req, res, next) {
 
   const [user, pass] = Buffer.from(credentials, "base64").toString().split(":");
 
-  // Valida no Banco de Dados
-  const isValid = await validateTinfoilCredentials(user, pass);
+  // Verifica credenciais E aprovação
+  try {
+    const foundUser = await User.findOne({
+      tinfoilUser: user,
+      tinfoilPass: pass,
+    });
 
-  if (isValid) {
-    next();
-  } else {
-    console.log(`[AUTH] 🚫 Tentativa falha Tinfoil: ${user}`);
-    // Delay artificial para evitar brute-force
-    setTimeout(
-      () => res.status(401).json({ error: "Credenciais Inválidas" }),
-      1000
-    );
+    if (foundUser) {
+      if (foundUser.isApproved) {
+        next(); // Sucesso
+      } else {
+        console.log(`[AUTH] 🚫 Usuário pendente tentou acessar: ${user}`);
+        setTimeout(
+          () =>
+            res
+              .status(403)
+              .json({ error: "Conta aguardando aprovação do Admin." }),
+          1000
+        );
+      }
+    } else {
+      console.log(`[AUTH] 🚫 Credenciais inválidas: ${user}`);
+      setTimeout(
+        () => res.status(401).json({ error: "Credenciais Inválidas" }),
+        1000
+      );
+    }
+  } catch (err) {
+    console.error("[AUTH] Erro:", err);
+    res.status(500).send("Erro interno de auth");
   }
 }

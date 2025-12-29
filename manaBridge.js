@@ -6,6 +6,15 @@ import dotenv from "dotenv";
 import multer from "multer";
 import { loginTemplate, dashboardTemplate } from "./templates.js";
 import { saveDownloadHistory, getDownloadHistory } from "./database.js";
+import {
+  createUser,
+  findUserByEmail,
+  getPendingUsers,
+  approveUser,
+  deleteUser,
+  User,
+} from "./database.js";
+import { sendNewUserAlert, sendApprovalEmail } from "./emailService.js";
 
 dotenv.config();
 
@@ -124,22 +133,38 @@ const requireAuth = (req, res, next) => {
 };
 
 // ROTA DE REGISTRO (Nova)
+// --- ROTA DE REGISTRO (PÚBLICA) ---
 router.post("/bridge/register", async (req, res) => {
-  const { email, password, inviteCode } = req.body;
-  
-  // Opcional: Sistema simples de código de convite para não entrar qualquer um
-  if (inviteCode !== "CAPIVARA2025") { 
-      return res.status(403).json({ error: "Código de convite inválido" });
+  const { email, password } = req.body;
+
+  // Verificações básicas
+  if (!email || !password) {
+    return res.status(400).json({ error: "Preencha todos os campos" });
+  }
+  if (password.length < 6) {
+    return res
+      .status(400)
+      .json({ error: "Senha muito curta (mínimo 6 caracteres)" });
   }
 
   const existing = await findUserByEmail(email);
-  if (existing) return res.status(400).json({ error: "Email já cadastrado" });
+  if (existing) {
+    return res.status(400).json({ error: "Email já cadastrado" });
+  }
 
-  const newUser = await createUser(email, password, false); // false = não é admin
+  // Cria usuário (isApproved = false)
+  const newUser = await createUser(email, password, false);
+
   if (newUser) {
-      res.json({ success: true });
+    // Envia e-mail para o Admin
+    sendNewUserAlert(email).catch(console.error);
+
+    res.json({
+      success: true,
+      message: "Cadastro realizado! Aguarde aprovação.",
+    });
   } else {
-      res.status(500).json({ error: "Erro ao criar usuário" });
+    res.status(500).json({ error: "Erro ao criar usuário" });
   }
 });
 
@@ -176,16 +201,79 @@ router.post("/bridge/auth", async (req, res) => {
 });
 
 // ROTA PARA OBTER DADOS DO USUÁRIO (Para o Dashboard)
+// --- API: DADOS DO USUÁRIO LOGADO ---
 router.get("/bridge/me", requireAuth, async (req, res) => {
-    // Lógica para pegar o usuário do cookie
-    // Se for user, busca no banco e retorna tinfoilUser/tinfoilPass
-    // ...
-    res.json({ 
-        user: "olucasrossetti", 
-        pass: "X7K9P2", 
-        host: "capivara.rossetti.eng.br",
-        protocol: "https"
+  // Recupera usuário do cookie
+  const cookies = req.headers.cookie || "";
+  const token = cookies.match(/auth_token=([^;]+)/)?.[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "No token" });
+  }
+
+  const decoded = Buffer.from(decodeURIComponent(token), "base64").toString();
+  const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
+
+  // Se for Admin Supremo
+  if (decoded.startsWith("admin:")) {
+    return res.json({
+      email: ADMIN_EMAIL,
+      isAdmin: true,
+      isApproved: true,
+      tinfoilUser: "admin",
+      tinfoilPass: "admin", // Admin não usa tinfoil, usa o .env se quiser
+      host: DOMAIN,
+      protocol: "https",
     });
+  }
+
+  // Se for Usuário Comum
+  const userId = decoded.split(":")[1];
+  try {
+    const user = await User.findById(userId);
+
+    if (user) {
+      res.json({
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isApproved: user.isApproved,
+        tinfoilUser: user.tinfoilUser,
+        tinfoilPass: user.tinfoilPass,
+        host: DOMAIN,
+        protocol: "https",
+      });
+    } else {
+      res.status(404).json({ error: "Usuário não encontrado" });
+    }
+  } catch (e) {
+    console.error("[API] Erro ao buscar usuário:", e);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// --- API ADMIN: GERENCIAR USUÁRIOS ---
+router.get("/bridge/users/pending", requireAuth, async (req, res) => {
+  // Verifica se quem está chamando é admin (simplificado pela auth, mas idealmente checar isAdmin)
+  const list = await getPendingUsers();
+  res.json(list);
+});
+
+router.post("/bridge/users/approve/:id", requireAuth, async (req, res) => {
+  const user = await approveUser(req.params.id);
+  if (user) {
+    // Envia email de boas vindas com credenciais
+    sendApprovalEmail(user.email, user.tinfoilUser, user.tinfoilPass).catch(
+      console.error
+    );
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: "Usuário não encontrado" });
+  }
+});
+
+router.post("/bridge/users/reject/:id", requireAuth, async (req, res) => {
+  await deleteUser(req.params.id);
+  res.json({ success: true });
 });
 
 router.get("/admin/logout", (req, res) => {

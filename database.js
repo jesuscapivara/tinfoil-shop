@@ -46,12 +46,13 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // Senha do painel web
   isAdmin: { type: Boolean, default: false },
-  
+  isApproved: { type: Boolean, default: false }, // ⚠️ NOVO: Aprovação do admin
+
   // Credenciais geradas para o Tinfoil
   tinfoilUser: { type: String, required: true, unique: true },
   tinfoilPass: { type: String, required: true },
-  
-  createdAt: { type: Date, default: Date.now }
+
+  createdAt: { type: Date, default: Date.now },
 });
 
 export const User = mongoose.model("User", userSchema);
@@ -64,13 +65,14 @@ export async function createUser(email, webPassword, isAdmin = false) {
     .split("@")[0]
     .replace(/[^a-zA-Z0-9]/g, "")
     .toLowerCase();
-  const tinfoilPass = Math.random().toString(36).slice(-8).toUpperCase(); // Ex: X7K9P2M1
+  const tinfoilPass = Math.random().toString(36).slice(-6).toUpperCase(); // 6 caracteres
 
   try {
     const user = new User({
       email,
       password: webPassword, // Em produção real, use bcrypt. Aqui vamos simples.
       isAdmin,
+      isApproved: isAdmin, // Se for admin, já nasce aprovado. Se for user, nasce pendente.
       tinfoilUser,
       tinfoilPass,
     });
@@ -89,9 +91,53 @@ export async function findUserByEmail(email) {
 
 export async function validateTinfoilCredentials(user, pass) {
   if (!isConnected) return false;
-  // Verifica se existe alguém com esse user/pass do Tinfoil
-  const found = await User.findOne({ tinfoilUser: user, tinfoilPass: pass });
+  // Verifica se existe alguém com esse user/pass do Tinfoil E se está aprovado
+  const found = await User.findOne({
+    tinfoilUser: user,
+    tinfoilPass: pass,
+    isApproved: true, // ⚠️ Só permite se aprovado
+  });
   return !!found;
+}
+
+// ═══════════════════════════════════════════════
+// FUNÇÕES DE APROVAÇÃO DE USUÁRIOS
+// ═══════════════════════════════════════════════
+
+export async function getPendingUsers() {
+  if (!isConnected) return [];
+  try {
+    return await User.find({ isApproved: false, isAdmin: false })
+      .sort({ createdAt: -1 })
+      .lean();
+  } catch (err) {
+    console.error("[DB] Erro ao buscar pendentes:", err.message);
+    return [];
+  }
+}
+
+export async function approveUser(id) {
+  if (!isConnected) return null;
+  try {
+    return await User.findByIdAndUpdate(
+      id,
+      { isApproved: true },
+      { new: true }
+    );
+  } catch (err) {
+    console.error("[DB] Erro ao aprovar usuário:", err.message);
+    return null;
+  }
+}
+
+export async function deleteUser(id) {
+  if (!isConnected) return null;
+  try {
+    return await User.findByIdAndDelete(id);
+  } catch (err) {
+    console.error("[DB] Erro ao deletar usuário:", err.message);
+    return null;
+  }
 }
 
 // Schema para histórico de downloads

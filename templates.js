@@ -76,27 +76,58 @@ export function loginTemplate() {
             display: none; 
         }
         .error.show { display: block; }
+        .toggle-link {
+            margin-top: 15px;
+            display: block;
+            color: var(--primary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        .toggle-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
     <div class="login-card">
         <span class="logo">🎮</span>
-        <h2>Mana Admin</h2>
+        <h2 id="formTitle">Mana Shop</h2>
         <div id="error" class="error"></div>
+        
         <form id="loginForm">
             <input type="email" id="email" placeholder="Email" required autocomplete="email">
             <input type="password" id="password" placeholder="Senha" required autocomplete="current-password">
-            <button type="submit" id="submitBtn">Entrar</button>
+            <button type="submit" id="loginBtn">Entrar</button>
+            <a class="toggle-link" onclick="toggleForm()">Não tem conta? Cadastre-se</a>
+        </form>
+
+        <form id="registerForm" style="display:none;">
+            <input type="email" id="regEmail" placeholder="Seu Email" required>
+            <input type="password" id="regPass" placeholder="Crie uma Senha (mín. 6 caracteres)" required>
+            <button type="submit" id="regBtn">Solicitar Acesso</button>
+            <a class="toggle-link" onclick="toggleForm()">Já tem conta? Entrar</a>
         </form>
     </div>
     <script>
+        let isLogin = true;
+        
+        function toggleForm() {
+            isLogin = !isLogin;
+            document.getElementById('loginForm').style.display = isLogin ? 'block' : 'none';
+            document.getElementById('registerForm').style.display = isLogin ? 'none' : 'block';
+            document.getElementById('formTitle').innerText = isLogin ? 'Mana Shop' : 'Solicitar Acesso';
+            document.getElementById('error').classList.remove('show');
+        }
+
+        // Lógica de Login
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const errorDiv = document.getElementById('error');
-            const btn = document.getElementById('submitBtn');
+            const btn = document.getElementById('loginBtn');
             
             errorDiv.classList.remove('show');
             btn.disabled = true;
@@ -129,6 +160,41 @@ export function loginTemplate() {
                 btn.disabled = false;
                 btn.innerText = 'Entrar';
             }
+        });
+
+        // Lógica de Registro
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('regBtn');
+            const errorDiv = document.getElementById('error');
+            btn.disabled = true;
+            btn.innerText = 'Enviando...';
+            errorDiv.classList.remove('show');
+            
+            try {
+                const res = await fetch('/bridge/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        email: document.getElementById('regEmail').value,
+                        password: document.getElementById('regPass').value
+                    })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    alert("Solicitação enviada! Você receberá um e-mail quando for aprovado.");
+                    location.reload();
+                } else {
+                    errorDiv.innerText = data.error || 'Erro ao cadastrar';
+                    errorDiv.classList.add('show');
+                }
+            } catch(e) {
+                errorDiv.innerText = "Erro de conexão";
+                errorDiv.classList.add('show');
+            }
+            btn.disabled = false;
+            btn.innerText = 'Solicitar Acesso';
         });
     </script>
 </body>
@@ -256,6 +322,32 @@ export function dashboardTemplate() {
             color: var(--text-muted);
             text-align: right;
             font-style: italic;
+        }
+        
+        /* Admin Panel */
+        .approve-btn, .reject-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 6px;
+            transition: opacity 0.2s;
+        }
+        .approve-btn {
+            background: var(--success);
+            color: white;
+        }
+        .approve-btn:hover {
+            opacity: 0.85;
+        }
+        .reject-btn {
+            background: var(--error);
+            color: white;
+        }
+        .reject-btn:hover {
+            opacity: 0.85;
         }
         
         /* Index Status Box */
@@ -717,28 +809,20 @@ export function dashboardTemplate() {
             </div>
         </header>
 
-        <div class="credentials-box">
-            <h3>🔑 Suas Credenciais Tinfoil</h3>
+        <div id="user-status-box" class="credentials-box">
+            <h3>🔑 Carregando...</h3>
             <div class="cred-grid">
                 <div class="cred-item">
-                    <label>Protocol</label>
-                    <code>https</code>
-                </div>
-                <div class="cred-item">
-                    <label>Host</label>
-                    <code>capivara.rossetti.eng.br</code>
-                </div>
-                <div class="cred-item">
-                    <label>Username</label>
-                    <code id="tf-user">Carregando...</code>
-                </div>
-                <div class="cred-item">
-                    <label>Password</label>
-                    <code id="tf-pass">Carregando...</code>
+                    <label>Status</label>
+                    <code id="user-status">Verificando...</code>
                 </div>
             </div>
-            <div class="cred-footer">
-                Configure isso na aba "File Browser" do seu Switch.
+        </div>
+
+        <div id="admin-panel" class="credentials-box hidden" style="border-color: var(--warning);">
+            <h3>👑 Aprovações Pendentes</h3>
+            <div id="pending-list" class="grid" style="margin-top: 15px;">
+                <div class="empty">Carregando...</div>
             </div>
         </div>
 
@@ -1267,23 +1351,142 @@ export function dashboardTemplate() {
         // CREDENTIALS LOADER
         // ═══════════════════════════════════════════════
         
-        async function loadCredentials() {
+        async function loadUser() {
             try {
                 const res = await fetch('/bridge/me', { credentials: 'include' });
                 if (res.status === 401) return window.location.href = '/admin/login';
                 
-                const data = await res.json();
-                document.getElementById('tf-user').textContent = data.user || 'N/A';
-                document.getElementById('tf-pass').textContent = data.pass || 'N/A';
+                const user = await res.json();
+                const box = document.getElementById('user-status-box');
+                box.classList.remove('hidden');
+
+                if (user.isAdmin) {
+                    // É ADMIN
+                    document.getElementById('admin-panel').classList.remove('hidden');
+                    loadPendingUsers();
+                    box.innerHTML = \`
+                        <h3>👑 Admin Master</h3>
+                        <p style="color: var(--text-muted); margin-top: 10px;">Você tem controle total do sistema.</p>
+                    \`;
+                } else if (user.isApproved) {
+                    // É USUÁRIO APROVADO
+                    box.style.borderColor = 'var(--success)';
+                    box.innerHTML = \`
+                        <h3>🔑 Suas Credenciais Tinfoil</h3>
+                        <div class="cred-grid">
+                            <div class="cred-item">
+                                <label>Protocol</label>
+                                <code>https</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Host</label>
+                                <code>\${user.host}</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Username</label>
+                                <code>\${user.tinfoilUser}</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Password</label>
+                                <code>\${user.tinfoilPass}</code>
+                            </div>
+                        </div>
+                        <div class="cred-footer">
+                            Configure isso na aba "File Browser" do seu Switch.
+                        </div>
+                    \`;
+                } else {
+                    // É USUÁRIO PENDENTE
+                    box.style.borderColor = 'var(--warning)';
+                    box.innerHTML = \`
+                        <h3 style="color: var(--warning)">⏳ Aguardando Aprovação</h3>
+                        <p style="color: var(--text-muted); margin-top: 10px;">
+                            Seu cadastro foi recebido. Você receberá um e-mail com suas credenciais assim que o administrador aprovar.
+                        </p>
+                    \`;
+                    // Esconde ferramentas de upload
+                    const tabs = document.querySelector('.tabs');
+                    const addBox = document.querySelector('.add-box');
+                    if (tabs) tabs.style.display = 'none';
+                    if (addBox) addBox.style.display = 'none';
+                }
             } catch(e) {
-                console.error('Erro ao carregar credenciais:', e);
-                document.getElementById('tf-user').textContent = 'Erro';
-                document.getElementById('tf-pass').textContent = 'Erro';
+                console.error('Erro ao carregar usuário:', e);
+            }
+        }
+
+        async function loadPendingUsers() {
+            try {
+                const res = await fetch('/bridge/users/pending', { credentials: 'include' });
+                if (res.status === 401) return;
+                
+                const users = await res.json();
+                const list = document.getElementById('pending-list');
+                
+                if(users.length === 0) {
+                    list.innerHTML = '<div class="empty">Nenhuma solicitação pendente.</div>';
+                    return;
+                }
+
+                list.innerHTML = users.map(u => \`
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="game-name">\${u.email}</span>
+                            <div>
+                                <button class="approve-btn" onclick="approveUser('\${u._id}')">✅ Aprovar</button>
+                                <button class="reject-btn" onclick="rejectUser('\${u._id}')">❌ Rejeitar</button>
+                            </div>
+                        </div>
+                        <div class="status-text">
+                            Cadastrado em \${new Date(u.createdAt).toLocaleString('pt-BR')}
+                        </div>
+                    </div>
+                \`).join('');
+            } catch(e) {
+                console.error('Erro ao carregar pendentes:', e);
+            }
+        }
+
+        async function approveUser(id) {
+            if(!confirm('Aprovar este usuário e enviar email com credenciais?')) return;
+            try {
+                const res = await fetch('/bridge/users/approve/' + id, { 
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (res.ok) {
+                    showNotification('✅ Usuário aprovado! Email enviado.', 'success');
+                    loadPendingUsers();
+                } else {
+                    showNotification('Erro ao aprovar', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showNotification('Erro de conexão', 'error');
+            }
+        }
+        
+        async function rejectUser(id) {
+            if(!confirm('Rejeitar e deletar este usuário?')) return;
+            try {
+                const res = await fetch('/bridge/users/reject/' + id, { 
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (res.ok) {
+                    showNotification('❌ Usuário rejeitado', 'info');
+                    loadPendingUsers();
+                } else {
+                    showNotification('Erro ao rejeitar', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showNotification('Erro de conexão', 'error');
             }
         }
         
         // Carrega status inicial e atualiza a cada 2 segundos
-        loadCredentials();
+        loadUser();
         loadIndexStatus();
         setInterval(loadIndexStatus, 2000);
     </script>
