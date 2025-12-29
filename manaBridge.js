@@ -976,7 +976,7 @@ async function getDirectLink(path) {
 // Pausa o stream, envia o chunk, e resume
 // ✅ 20MB é bom equilíbrio entre velocidade e uso de RAM
 
-const SMART_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB por chunk (otimizado após testes)
+const SMART_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB por chunk (otimizado após testes)
 
 async function uploadFileToDropbox(
   file,
@@ -1060,7 +1060,10 @@ async function uploadSmallFile(
   });
 }
 
-// Smart Stream para arquivos grandes (> 10MB)
+// Helper para esperar (Backoff)
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Smart Stream para arquivos grandes (> 10MB) com Retry Pattern
 async function uploadWithSmartStream(
   file,
   destPath,
@@ -1081,62 +1084,37 @@ async function uploadWithSmartStream(
     const stream = file.createReadStream();
 
     // Atualiza status inicial
-    activeDownloads[downloadId].currentFile = fileName;
-    activeDownloads[downloadId].fileIndex = currentIndex + 1;
-    activeDownloads[downloadId].uploadStatus = `Preparando upload...`;
+    if (activeDownloads[downloadId]) {
+      activeDownloads[downloadId].currentFile = fileName;
+      activeDownloads[downloadId].fileIndex = currentIndex + 1;
+      activeDownloads[downloadId].uploadStatus = `Preparando upload...`;
+    }
 
     log(
       `📤 Smart Stream: ${(fileSize / 1024 / 1024).toFixed(
         2
-      )} MB em ~${totalChunks} chunks de 20MB`,
+      )} MB em ~${totalChunks} chunks de ${(
+        SMART_CHUNK_SIZE /
+        1024 /
+        1024
+      ).toFixed(0)}MB`,
       "UPLOAD"
     );
 
-    stream.on("data", async (chunk) => {
-      // ⚠️ VERIFICAÇÃO CRÍTICA: Para imediatamente se foi cancelado
-      if (
-        !activeDownloads[downloadId] ||
-        activeDownloads[downloadId].isCancelled
-      ) {
-        stream.destroy();
-        return reject(new Error("Cancelado pelo usuário"));
-      }
+    // Função interna para enviar chunk com Retries
+    const sendChunkWithRetry = async (chunkToSend, isFirst, isLast) => {
+      let attempts = 0;
+      const maxAttempts = 5; // Aumentado para 5 tentativas
 
-      // Acumula no buffer
-      buffer = Buffer.concat([buffer, chunk]);
-
-      // Se o buffer encheu (50MB), hora de enviar!
-      if (buffer.length >= SMART_CHUNK_SIZE) {
-        // PAUSA o stream para não estourar a memória
-        stream.pause();
-
-        // ⚠️ VERIFICAÇÃO ANTES DE ENVIAR CHUNK
-        if (
-          !activeDownloads[downloadId] ||
-          activeDownloads[downloadId].isCancelled
-        ) {
-          stream.destroy();
-          return reject(new Error("Cancelado pelo usuário"));
-        }
-
+      while (attempts < maxAttempts) {
         try {
-          const chunkToSend = buffer.slice(0, SMART_CHUNK_SIZE);
-          const remaining = buffer.slice(SMART_CHUNK_SIZE);
-          chunkNum++;
+          if (isFirst && offset === 0) {
+            // Início da sessão
+            if (activeDownloads[downloadId])
+              activeDownloads[
+                downloadId
+              ].uploadStatus = `Conectando ao Dropbox...`;
 
-          // Calcula velocidade
-          const now = Date.now();
-          const elapsed = (now - lastChunkTime) / 1000;
-          const speed =
-            elapsed > 0 ? SMART_CHUNK_SIZE / 1024 / 1024 / elapsed : 0;
-          lastChunkTime = now;
-
-          if (offset === 0) {
-            // Primeiro chunk: inicia sessão
-            activeDownloads[
-              downloadId
-            ].uploadStatus = `Conectando ao Dropbox...`;
-            log(`   🔗 Iniciando sessão Dropbox...`, "UPLOAD");
             const res = await dbx.filesUploadSessionStart({
               close: false,
               contents: chunkToSend,
@@ -1146,45 +1124,117 @@ async function uploadWithSmartStream(
               `   ✓ Sessão criada: ${sessionId.substring(0, 12)}...`,
               "UPLOAD"
             );
+          } else if (isLast) {
+            // Finalização (Commit)
+            await dbx.filesUploadSessionFinish({
+              cursor: { session_id: sessionId, offset: offset },
+              commit: {
+                path: destPath,
+                mode: { ".tag": "add" },
+                autorename: true,
+                mute: true,
+              },
+              contents: chunkToSend,
+            });
           } else {
-            // Chunks intermediários
+            // Meio do arquivo (Append)
             await dbx.filesUploadSessionAppendV2({
               cursor: { session_id: sessionId, offset: offset },
               close: false,
               contents: chunkToSend,
             });
           }
+          // Se chegou aqui, sucesso! Sai do loop.
+          return;
+        } catch (err) {
+          attempts++;
+          const errorMsg =
+            err.error && err.error.error_summary
+              ? err.error.error_summary
+              : err.message;
+          const is409 =
+            JSON.stringify(err).includes("409") ||
+            errorMsg.includes("409") ||
+            err.status === 409;
+
+          log(
+            `   ⚠️ Erro no chunk (Tentativa ${attempts}/${maxAttempts}): ${errorMsg}`,
+            "WARN"
+          );
+
+          if (attempts >= maxAttempts) throw err; // Desiste após max tentativas
+
+          // Se for erro 409 (Conflito de Offset), é grave, mas tentar de novo pode alinhar se for erro de leitura
+          // Se for erro de rede (5xx, timeout), o retry resolve.
+
+          // Backoff exponencial: espera 2s, 4s, 8s...
+          await sleep(2000 * Math.pow(2, attempts - 1));
+        }
+      }
+    };
+
+    stream.on("data", async (chunk) => {
+      // 🛡️ VERIFICAÇÃO CRÍTICA DE CANCELAMENTO
+      if (
+        !activeDownloads[downloadId] ||
+        activeDownloads[downloadId].isCancelled
+      ) {
+        stream.destroy();
+        return reject(new Error("Cancelado pelo usuário"));
+      }
+
+      buffer = Buffer.concat([buffer, chunk]);
+
+      if (buffer.length >= SMART_CHUNK_SIZE) {
+        stream.pause(); // ⏸️ PAUSA O STREAM
+
+        try {
+          const chunkToSend = buffer.slice(0, SMART_CHUNK_SIZE);
+          const remaining = buffer.slice(SMART_CHUNK_SIZE);
+          chunkNum++;
+
+          // Stats de velocidade
+          const now = Date.now();
+          const elapsed = (now - lastChunkTime) / 1000;
+          const speed =
+            elapsed > 0 ? SMART_CHUNK_SIZE / 1024 / 1024 / elapsed : 0;
+          lastChunkTime = now;
+
+          // 🔄 ENVIA COM RETRY
+          await sendChunkWithRetry(chunkToSend, offset === 0, false);
 
           offset += chunkToSend.length;
           buffer = remaining;
 
-          // Atualiza progresso visual para o frontend
+          // Atualiza UI
           const filePercent = ((offset / fileSize) * 100).toFixed(1);
           const uploadedMB = (offset / 1024 / 1024).toFixed(1);
           const totalMB = (fileSize / 1024 / 1024).toFixed(1);
 
-          activeDownloads[downloadId].uploadSpeed =
-            speed > 0 ? `${speed.toFixed(1)} MB/s` : "-- MB/s";
-          activeDownloads[
-            downloadId
-          ].uploadStatus = `Enviando chunk ${chunkNum}/${totalChunks}`;
-          activeDownloads[downloadId].currentFileProgress =
-            parseFloat(filePercent);
-          activeDownloads[downloadId].uploadedBytes = `${uploadedMB} MB`;
-          activeDownloads[downloadId].uploadTotal = `${totalMB} MB`;
+          if (activeDownloads[downloadId]) {
+            activeDownloads[downloadId].uploadSpeed =
+              speed > 0 ? `${speed.toFixed(1)} MB/s` : "-- MB/s";
+            activeDownloads[
+              downloadId
+            ].uploadStatus = `Enviando chunk ${chunkNum}/${totalChunks}`;
+            activeDownloads[downloadId].currentFileProgress =
+              parseFloat(filePercent);
+            activeDownloads[downloadId].uploadedBytes = `${uploadedMB} MB`;
+            activeDownloads[downloadId].uploadTotal = `${totalMB} MB`;
 
-          // ✅ Calcula progresso total em tempo real (arquivos completos + progresso do atual)
-          const download = activeDownloads[downloadId];
-          if (download && download.totalFiles && download.fileIndex) {
-            const completedFiles = download.fileIndex - 1; // Arquivos já completos
-            const currentFileProgress = parseFloat(filePercent) / 100; // Progresso do arquivo atual (0-1)
-            const totalProgress =
-              ((completedFiles + currentFileProgress) / download.totalFiles) *
-              100;
-            activeDownloads[downloadId].uploadPercent = Math.min(
-              100,
-              totalProgress.toFixed(1)
-            );
+            // ✅ Calcula progresso total em tempo real
+            const download = activeDownloads[downloadId];
+            if (download && download.totalFiles && download.fileIndex) {
+              const completedFiles = download.fileIndex - 1;
+              const currentFileProgress = parseFloat(filePercent) / 100;
+              const totalProgress =
+                ((completedFiles + currentFileProgress) / download.totalFiles) *
+                100;
+              activeDownloads[downloadId].uploadPercent = Math.min(
+                100,
+                totalProgress.toFixed(1)
+              );
+            }
           }
 
           log(
@@ -1194,18 +1244,16 @@ async function uploadWithSmartStream(
             "UPLOAD"
           );
 
-          // RETOMA o stream
-          stream.resume();
+          stream.resume(); // ▶️ RETOMA O STREAM
         } catch (err) {
           stream.destroy();
-          log(`❌ Erro no chunk ${chunkNum}: ${err.message}`, "ERROR");
+          log(`❌ Falha fatal no chunk ${chunkNum}: ${err.message}`, "ERROR");
           reject(err);
         }
       }
     });
 
     stream.on("end", async () => {
-      // ⚠️ VERIFICAÇÃO CRÍTICA: Não finaliza se foi cancelado
       if (
         !activeDownloads[downloadId] ||
         activeDownloads[downloadId].isCancelled
@@ -1213,62 +1261,28 @@ async function uploadWithSmartStream(
         return reject(new Error("Cancelado pelo usuário"));
       }
 
-      // Envia o que sobrou no buffer (último chunk)
       try {
-        if (buffer.length > 0 || offset === 0) {
-          if (offset === 0) {
-            // Arquivo pequeno que não encheu nenhum chunk
-            log(`   📤 Upload único (arquivo não encheu chunk)`, "UPLOAD");
-            const res = await dbx.filesUploadSessionStart({
-              close: false,
-              contents: buffer,
-            });
-            sessionId = res.result.session_id;
-            offset = buffer.length;
-          }
+        log(
+          `   🏁 Finalizando sessão (${(buffer.length / 1024 / 1024).toFixed(
+            2
+          )} MB restantes)...`,
+          "UPLOAD"
+        );
 
-          // Finaliza a sessão
-          log(
-            `   🏁 Finalizando sessão (${(buffer.length / 1024 / 1024).toFixed(
-              2
-            )} MB restantes)...`,
-            "UPLOAD"
-          );
-
-          await dbx.filesUploadSessionFinish({
-            cursor: { session_id: sessionId, offset: offset },
-            commit: {
-              path: destPath,
-              mode: { ".tag": "add" },
-              autorename: true,
-              mute: true,
-            },
-            contents: buffer,
-          });
-        } else if (sessionId) {
-          // Buffer vazio, só finaliza
-          await dbx.filesUploadSessionFinish({
-            cursor: { session_id: sessionId, offset: offset },
-            commit: {
-              path: destPath,
-              mode: { ".tag": "add" },
-              autorename: true,
-              mute: true,
-            },
-            contents: Buffer.alloc(0),
-          });
-        }
+        // Envia o último pedaço e faz o Commit
+        // Se offset é 0, significa que o arquivo era menor que 1 chunk (upload único)
+        await sendChunkWithRetry(buffer, offset === 0, true);
 
         log(`✅ Smart Stream concluído: ${destPath}`, "UPLOAD");
         resolve();
       } catch (err) {
-        log(`❌ Erro ao finalizar: ${err.message}`, "ERROR");
+        log(`❌ Erro ao finalizar sessão: ${err.message}`, "ERROR");
         reject(err);
       }
     });
 
     stream.on("error", (err) => {
-      log(`❌ Stream error: ${err.message}`, "ERROR");
+      log(`❌ Erro de leitura do stream (Disco): ${err.message}`, "ERROR");
       reject(err);
     });
   });
