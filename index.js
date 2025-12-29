@@ -90,22 +90,29 @@ async function getDirectLink(path) {
   try {
     let sharedLink = "";
     const listResponse = await dbx.sharingListSharedLinks({ path: path });
+
     if (listResponse.result.links.length > 0) {
       sharedLink = listResponse.result.links[0].url;
     } else {
+      // Aqui é onde o Rate Limit geralmente explode
       const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
         path: path,
       });
       sharedLink = createResponse.result.url;
     }
+
     const cdnUrl = new URL(sharedLink);
     cdnUrl.hostname = "dl.dropboxusercontent.com";
     cdnUrl.searchParams.delete("dl");
     cdnUrl.searchParams.delete("preview");
     return cdnUrl.toString();
   } catch (e) {
-    // Log silencioso - muitos erros podem ser rate limit, não queremos poluir o console
-    // Se precisar debug, descomente: log.warn(`Erro ao gerar link para ${path}: ${e.message}`);
+    // Se for erro 429, vai aparecer no log agora
+    const errorMsg =
+      e.error && e.error.error_summary ? e.error.error_summary : e.message;
+    console.log(
+      `[API DROPBOX] ❌ Erro no arquivo: ${path} | Motivo: ${errorMsg}`
+    );
     return null;
   }
 }
@@ -160,8 +167,10 @@ async function buildGameIndex() {
 
     indexingProgress = "Processando Inteligência...";
 
-    // ✅ Processamento em lotes com progresso incremental
-    const BATCH_SIZE = 15; // Lotes de 15 para não sobrecarregar
+    // ✅ Ajuste Agressivo de Throughput
+    // Dropbox Free aguenta mal 15 reqs simultâneas de criação de link.
+    // Vamos ser conservadores para garantir a indexação.
+    const BATCH_SIZE = 4; // Reduzido de 15 para 4 (Rate Limit Safe)
     let processedCount = 0;
     let games = [];
 
@@ -180,7 +189,7 @@ async function buildGameIndex() {
           try {
             const directUrl = await getDirectLink(file.path_lower);
             if (!directUrl) {
-              log.warn(`⚠️ Falha ao gerar link: ${file.name}`);
+              // Log já foi feito dentro do getDirectLink
               return null;
             }
 
@@ -210,9 +219,11 @@ async function buildGameIndex() {
 
       games = games.concat(batchResults.filter((g) => g !== null));
 
-      // Delay entre lotes para não sobrecarregar
+      // ✅ Aumentar Delay entre lotes
+      // Dropbox Rate Limit "esfria" rápido, mas precisa de respiro.
+      // 2000ms garante que não sejamos banidos temporariamente.
       if (i + BATCH_SIZE < validFiles.length) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
