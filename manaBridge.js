@@ -7,6 +7,7 @@ import multer from "multer";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { EventEmitter } from "events";
+import fs from "fs";
 import { loginView } from "./frontend/views/login.js";
 import { dashboardView } from "./frontend/views/dashboard.js";
 
@@ -478,29 +479,32 @@ function log(msg, type = "INFO") {
 }
 
 // ═══════════════════════════════════════════════
-// HELPER: DESTROY SEGURO DE TORRENT
+// HELPER: DESTROY SEGURO DE TORRENT (CORRIGIDO)
 // ═══════════════════════════════════════════════
 
-function safeDestroyTorrent(torrent, torrentInstance = null) {
-  try {
-    if (torrent && !torrent.destroyed) {
-      torrent.destroy();
-      return true;
-    }
-  } catch (err) {
-    // Ignora erro se já foi destruído
-  }
+function safeDestroyTorrent(torrent) {
+  if (!torrent) return;
 
-  try {
-    if (torrentInstance && !torrentInstance.destroyed) {
-      torrentInstance.destroy();
-      return true;
+  // Executa no próximo ciclo do processador para evitar conflito
+  setTimeout(() => {
+    try {
+      // Tenta remover pelo cliente usando o HASH (String) e não o Objeto
+      if (torrent.infoHash && client.get(torrent.infoHash)) {
+        client.remove(torrent.infoHash, { destroyStore: true }, (err) => {
+          if (err)
+            console.error(
+              "[SAFE-DESTROY] Erro ao remover cliente:",
+              err.message
+            );
+        });
+      } else if (!torrent.destroyed) {
+        torrent.destroy({ destroyStore: true });
+      }
+    } catch (err) {
+      // Engole o erro silenciosamente para não derrubar o servidor
+      console.log(`[SAFE-DESTROY] Erro suprimido: ${err.message}`);
     }
-  } catch (err) {
-    // Ignora erro se já foi destruído
-  }
-
-  return false;
+  }, 100);
 }
 
 function extractGameName(fileName) {
@@ -589,7 +593,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             activeDownloads[id].errorTimestamp = Date.now(); // Marca quando o erro ocorreu
 
             // Destrói o torrent imediatamente para não baixar nada
-            safeDestroyTorrent(torrent, activeDownloads[id]?.torrentInstance);
+            safeDestroyTorrent(torrent);
 
             // Remove da lista ativa após 1 minuto (auto-remoção)
             setTimeout(() => {
@@ -629,7 +633,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           activeDownloads[id].error =
             "Nenhum jogo Switch encontrado no torrent";
           activeDownloads[id].errorTimestamp = Date.now();
-          safeDestroyTorrent(torrent, activeDownloads[id]?.torrentInstance);
+          safeDestroyTorrent(torrent);
           // Auto-remoção após 1 minuto
           setTimeout(() => {
             if (activeDownloads[id] && activeDownloads[id].phase === "error") {
@@ -898,22 +902,30 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
               }
             }, 60000);
           } finally {
-            // 🛡️ BLINDAGEM CONTRA CRASH
+            // 🛡️ LIMPEZA DE ARQUIVOS TEMPORÁRIOS
             try {
-              if (
-                safeDestroyTorrent(
-                  torrent,
-                  activeDownloads[id]?.torrentInstance
-                )
-              ) {
-                log(`🗑️ Torrent destruído com sucesso`, "TORRENT");
+              // Caminho da pasta temporária criada pelo WebTorrent
+              // O WebTorrent salva em /tmp/{torrent.name} ou /tmp/{infoHash}
+              const tempFolder = `/tmp/${torrent.name || torrent.infoHash}`;
+              if (fs.existsSync(tempFolder)) {
+                fs.rmSync(tempFolder, { recursive: true, force: true });
+                log(`🧹 Pasta temporária limpa: ${tempFolder}`, "CLEANUP");
               }
-            } catch (errDestroy) {
-              log(
-                `⚠️ Erro não fatal ao destruir torrent: ${errDestroy.message}`,
-                "WARN"
-              );
+
+              // Também tenta limpar pelo gameFolderName se disponível
+              if (activeDownloads[id]?.name) {
+                const gameFolderPath = `/tmp/${activeDownloads[id].name}`;
+                if (fs.existsSync(gameFolderPath)) {
+                  fs.rmSync(gameFolderPath, { recursive: true, force: true });
+                  log(`🧹 Pasta de jogo limpa: ${gameFolderPath}`, "CLEANUP");
+                }
+              }
+            } catch (fsErr) {
+              log(`⚠️ Erro ao limpar tmp: ${fsErr.message}`, "WARN");
             }
+
+            // Destruição segura do Torrent
+            safeDestroyTorrent(torrent);
 
             // Remove do ativo após 10 segundos
             setTimeout(() => {
@@ -1705,8 +1717,12 @@ router.post("/bridge/cancel/:id", requireAuth, (req, res) => {
 
     // Destrói o torrent se existir (blindado)
     try {
-      if (safeDestroyTorrent(download.torrent, download.torrentInstance)) {
+      if (download.torrent) {
+        safeDestroyTorrent(download.torrent);
         log(`🗑️ Torrent ${id} destruído pelo usuário`, "CANCEL");
+      } else if (download.torrentInstance) {
+        safeDestroyTorrent(download.torrentInstance);
+        log(`🗑️ Torrent instance ${id} destruído pelo usuário`, "CANCEL");
       }
     } catch (e) {
       log(`⚠️ Ignorando erro de destroy no cancelamento: ${e.message}`, "WARN");
