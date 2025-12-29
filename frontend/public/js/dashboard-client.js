@@ -382,28 +382,48 @@ function buildActiveCard(item) {
     : "inactive";
   const uploadClass = up.done ? "done" : isUploading ? "upload" : "inactive";
 
-  // Calcula progresso do upload baseado no arquivo atual
-  let uploadDisplayPercent = up.percent;
-  if (isUploading && up.currentFileProgress > 0) {
+  // Calcula progresso do upload baseado no arquivo atual (melhorado)
+  let uploadDisplayPercent = up.percent || 0;
+  if (isUploading && up.currentFileProgress > 0 && up.totalFiles) {
     // Progresso = (arquivos completos + progresso do atual) / total
-    const completedFiles = up.fileIndex - 1;
+    const completedFiles = (up.fileIndex || 1) - 1;
     const currentProgress = up.currentFileProgress / 100;
-    uploadDisplayPercent = (
-      ((completedFiles + currentProgress) / up.totalFiles) *
-      100
-    ).toFixed(1);
+    uploadDisplayPercent = parseFloat(
+      (((completedFiles + currentProgress) / up.totalFiles) * 100).toFixed(1)
+    );
   }
 
-  // Status dinâmico baseado na fase
+  // Status dinâmico baseado na fase (melhorado com mais detalhes)
   let statusText = "";
   if (isConnecting) {
     statusText = "🔍 Procurando peers...";
   } else if (isDownloading) {
     statusText = `📥 ${dl.downloaded} / ${dl.total} • ${dl.peers} peers • ETA: ${dl.eta}`;
   } else if (isUploading) {
-    const fileInfo =
-      up.totalFiles > 1 ? `Arquivo ${up.fileIndex}/${up.totalFiles}` : "";
-    statusText = `📤 ${up.status || "Enviando..."} ${fileInfo}`;
+    // Informações detalhadas do upload
+    const fileIndex = up.fileIndex || 1;
+    const totalFiles = up.totalFiles || 1;
+    const currentFile = up.currentFile || "arquivo";
+    const fileProgress = up.currentFileProgress || 0;
+    const uploadedBytes = up.uploadedBytes || "0 MB";
+    const uploadTotal = up.uploadTotal || "0 MB";
+    const speed = up.speed || "-- MB/s";
+
+    if (totalFiles > 1) {
+      // Múltiplos arquivos: mostra arquivo atual e progresso
+      const shortFileName =
+        currentFile.length > 30
+          ? currentFile.substring(0, 27) + "..."
+          : currentFile;
+      statusText = `📤 Arquivo ${fileIndex}/${totalFiles}: ${shortFileName} (${fileProgress.toFixed(
+        1
+      )}% - ${uploadedBytes}/${uploadTotal}) @ ${speed}`;
+    } else {
+      // Arquivo único: mostra progresso direto
+      statusText = `📤 ${currentFile} (${fileProgress.toFixed(
+        1
+      )}% - ${uploadedBytes}/${uploadTotal}) @ ${speed}`;
+    }
   } else if (isDone) {
     statusText = "✅ Disponível na loja!";
   }
@@ -520,7 +540,14 @@ async function loadIndexStatus() {
     const progressEl = document.getElementById("index-progress-text");
     const btn = document.getElementById("refresh-btn");
 
-    countEl.textContent = data.totalGames || 0;
+    // Exibe apenas jogos BASE na contagem principal
+    if (data.stats) {
+      countEl.textContent = data.stats.base || 0;
+      // Opcional: adicionar tooltip ou texto adicional com detalhes
+      countEl.title = `${data.stats.base} jogos base • ${data.stats.dlc} DLCs • ${data.stats.update} updates • ${data.stats.total} total`;
+    } else {
+      countEl.textContent = data.totalGames || 0;
+    }
 
     if (data.lastUpdate) {
       const date = new Date(data.lastUpdate);
@@ -726,6 +753,34 @@ async function rejectUser(id) {
   }
 }
 
+// Função para identificar tipo de jogo
+function getGameType(titleId) {
+  if (!titleId || titleId.length !== 16) return "UNKNOWN";
+  const suffix = titleId.slice(-3).toUpperCase();
+  if (suffix === "800") return "UPDATE";
+  if (suffix === "000") return "BASE";
+  return "DLC";
+}
+
+// Função para contar jogos por tipo
+function countGamesByType(games) {
+  const counts = {
+    base: 0,
+    dlc: 0,
+    update: 0,
+    unknown: 0,
+    total: games.length,
+  };
+  games.forEach((game) => {
+    const type = getGameType(game.id);
+    if (type === "BASE") counts.base++;
+    else if (type === "DLC") counts.dlc++;
+    else if (type === "UPDATE") counts.update++;
+    else counts.unknown++;
+  });
+  return counts;
+}
+
 // Função para carregar jogos
 async function loadGames() {
   try {
@@ -735,7 +790,18 @@ async function loadGames() {
     const data = await res.json();
     allGames = data.games || [];
 
-    document.getElementById("games-count").textContent = allGames.length;
+    // Conta apenas jogos BASE para exibição
+    const counts = countGamesByType(allGames);
+    document.getElementById("games-count").textContent = counts.base;
+
+    // Se houver stats no response, mostra detalhes
+    if (data.stats) {
+      const statsText = `${counts.base} base${
+        counts.dlc > 0 ? ` • ${counts.dlc} DLCs` : ""
+      }${counts.update > 0 ? ` • ${counts.update} updates` : ""}`;
+      // Pode adicionar um tooltip ou texto adicional se quiser
+    }
+
     renderGames(allGames);
   } catch (e) {
     console.error("Erro ao carregar jogos:", e);

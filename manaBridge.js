@@ -730,6 +730,10 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
 
               activeDownloads[id].currentFile = file.name;
               activeDownloads[id].fileIndex = i + 1;
+              activeDownloads[id].currentFileProgress = 0; // Reset progresso do arquivo atual
+              activeDownloads[
+                id
+              ].uploadStatus = `Preparando upload de ${file.name}...`;
 
               // 1. Upload do Arquivo (Mantém como está)
               await uploadFileToDropbox(
@@ -780,14 +784,13 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
               // ==========================================================
 
               totalUploaded += file.length;
-              const uploadProgress = Math.floor(
-                (totalUploaded / totalUploadSize) * 100
-              );
-              activeDownloads[id].uploadPercent = uploadProgress;
+              // Progresso total já é calculado em tempo real durante o upload
+              // Aqui apenas atualizamos os bytes totais
               activeDownloads[id].uploadedBytes =
                 totalUploaded > 1024 * 1024 * 1024
                   ? (totalUploaded / 1024 / 1024 / 1024).toFixed(2) + " GB"
                   : (totalUploaded / 1024 / 1024).toFixed(2) + " MB";
+              activeDownloads[id].currentFileProgress = 100; // Marca arquivo como completo
 
               log(
                 `✅ Upload ${i + 1}/${gameFiles.length} concluído!`,
@@ -1169,6 +1172,20 @@ async function uploadWithSmartStream(
             parseFloat(filePercent);
           activeDownloads[downloadId].uploadedBytes = `${uploadedMB} MB`;
           activeDownloads[downloadId].uploadTotal = `${totalMB} MB`;
+
+          // ✅ Calcula progresso total em tempo real (arquivos completos + progresso do atual)
+          const download = activeDownloads[downloadId];
+          if (download && download.totalFiles && download.fileIndex) {
+            const completedFiles = download.fileIndex - 1; // Arquivos já completos
+            const currentFileProgress = parseFloat(filePercent) / 100; // Progresso do arquivo atual (0-1)
+            const totalProgress =
+              ((completedFiles + currentFileProgress) / download.totalFiles) *
+              100;
+            activeDownloads[downloadId].uploadPercent = Math.min(
+              100,
+              totalProgress.toFixed(1)
+            );
+          }
 
           log(
             `   📦 Chunk ${chunkNum}/${totalChunks}: ${filePercent}% (${uploadedMB}/${totalMB} MB) @ ${speed.toFixed(

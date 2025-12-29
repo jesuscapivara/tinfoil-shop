@@ -87,6 +87,49 @@ export async function refreshCacheFromDB() {
   }
 }
 
+// ═══════════════════════════════════════════════
+// CLASSIFICAÇÃO E CONTAGEM DE JOGOS
+// ═══════════════════════════════════════════════
+
+/**
+ * Identifica o tipo de jogo baseado no Title ID
+ * @param {string} titleId - Title ID do jogo (16 caracteres hex)
+ * @returns {string} - 'BASE', 'UPDATE', 'DLC' ou 'UNKNOWN'
+ */
+function getGameType(titleId) {
+  if (!titleId || titleId.length !== 16) return "UNKNOWN";
+
+  const suffix = titleId.slice(-3).toUpperCase();
+  if (suffix === "800") return "UPDATE";
+  if (suffix === "000") return "BASE";
+  return "DLC";
+}
+
+/**
+ * Conta jogos por tipo
+ * @param {Array} games - Lista de jogos
+ * @returns {Object} - { base: number, dlc: number, update: number, total: number }
+ */
+function countGamesByType(games) {
+  const counts = {
+    base: 0,
+    dlc: 0,
+    update: 0,
+    unknown: 0,
+    total: games.length,
+  };
+
+  games.forEach((game) => {
+    const type = getGameType(game.id);
+    if (type === "BASE") counts.base++;
+    else if (type === "DLC") counts.dlc++;
+    else if (type === "UPDATE") counts.update++;
+    else counts.unknown++;
+  });
+
+  return counts;
+}
+
 // --- FUNÇÕES AUXILIARES ---
 
 async function processInBatches(items, batchSize, fn) {
@@ -247,14 +290,18 @@ async function buildGameIndex() {
 
     const successCount = cachedGames.length;
     const failedCount = validFiles.length - successCount;
+    const counts = countGamesByType(cachedGames);
 
     log.info(`✅ INDEXAÇÃO CONCLUÍDA!`);
     log.info(`   📊 Estatísticas:`);
-    log.info(`   ✅ Jogos indexados: ${successCount}`);
+    log.info(`   ✅ Total indexado: ${successCount} arquivos`);
+    log.info(`   🎮 Jogos base: ${counts.base}`);
+    log.info(`   📦 DLCs: ${counts.dlc}`);
+    log.info(`   🔄 Updates: ${counts.update}`);
     log.info(`   ❌ Falhas: ${failedCount}`);
     log.info(`   📁 Total de arquivos: ${validFiles.length}`);
 
-    indexingProgress = `Concluído (${successCount}/${validFiles.length} jogos)`;
+    indexingProgress = `Concluído (${counts.base} jogos base, ${counts.dlc} DLCs, ${counts.update} updates)`;
   } catch (e) {
     log.error("FALHA INDEXAÇÃO:", e);
     indexingProgress = `Erro: ${e.message || "Erro desconhecido"}`;
@@ -286,10 +333,12 @@ app.get(["/api", "/api/"], async (req, res) => {
   }
 
   // Tinfoil lê esse JSON. O campo "id" ajuda ele a achar a capa sozinho no Switch!
+  const counts = countGamesByType(cachedGames);
   res.setHeader("Content-Type", "application/json");
   res.json({
     files: cachedGames,
-    success: `Capivara Shop (${cachedGames.length} jogos)`,
+    success: `Capivara Shop (${counts.base} jogos base, ${counts.dlc} DLCs, ${counts.update} updates)`,
+    stats: counts, // Estatísticas detalhadas
   });
 });
 
@@ -300,17 +349,23 @@ app.get("/refresh", (req, res) => {
 
 // Endpoint para status da indexação (usado pelo admin dashboard)
 app.get("/indexing-status", (req, res) => {
+  const counts = countGamesByType(cachedGames);
   res.json({
     isIndexing,
     progress: indexingProgress,
     totalGames: cachedGames.length,
+    stats: counts, // Estatísticas detalhadas
     lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
   });
 });
 
 // Endpoint para o Dashboard (Site)
 app.get("/bridge/games", requireAuth, (req, res) => {
-  res.json({ games: cachedGames });
+  const counts = countGamesByType(cachedGames);
+  res.json({
+    games: cachedGames,
+    stats: counts, // Estatísticas para o dashboard
+  });
 });
 
 // ✅ Sistema de Eventos: "Ouvido" para sincronização automática
