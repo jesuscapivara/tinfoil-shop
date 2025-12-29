@@ -729,10 +729,34 @@ function renderGames(games) {
         const suffix = game.id.slice(-3).toUpperCase();
 
         // Calcula o BaseID (Zera os últimos 3 dígitos para achar a capa do jogo original)
-        const baseId = game.id.substring(0, 13) + "000";
+        // Padrão Nintendo Switch:
+        // - Os primeiros 13 caracteres são fixos (ex: 010073C01AF3)
+        // - O 14º dígito muda: 4 para jogo base, 8 para UPDATE, 5+ para DLC
+        // - Os últimos 3 dígitos: 000 para base, 800 para UPDATE, 001/002/etc para DLC
+        //
+        // Exemplos:
+        // - Jogo Base: 010073C01AF34000 (14º = 4, últimos 3 = 000)
+        // - UPDATE: 010073C01AF34800 → BaseID: 010073C01AF34000 (ajusta 8→4 e 800→000)
+        // - DLC: 010073C01AF35001 → BaseID: 010073C01AF34000 (ajusta 5→4 e 001→000)
 
-        // Define a URL da imagem usando o BaseID
-        imgUrl = `https://tinfoil.media/ti/${baseId}/256/256/`;
+        let baseId;
+        let imgUrl;
+
+        if (suffix === "000") {
+          // Já é o jogo base, usa o ID original
+          baseId = game.id;
+          imgUrl = `https://tinfoil.media/ti/${baseId}/256/256/`;
+        } else if (suffix === "800") {
+          // UPDATE: substitui o 14º dígito (8→4) e os últimos 3 (800→000)
+          // Exemplo: 010073C01AF34800 → 010073C01AF34000
+          baseId = game.id.substring(0, 13) + "4" + "000";
+          imgUrl = `https://tinfoil.media/ti/${baseId}/256/256/`;
+        } else {
+          // DLC: ajusta o 14º dígito para 4 (dígito do jogo base) e os últimos 3 para 000
+          // Exemplo: 010073C01AF35001 → 010073C01AF34000
+          baseId = game.id.substring(0, 13) + "4" + "000";
+          imgUrl = `https://tinfoil.media/ti/${baseId}/256/256/`;
+        }
         tinfoilUrl = `https://tinfoil.io/Title/${baseId}`;
 
         // Lógica do Badge (Selo)
