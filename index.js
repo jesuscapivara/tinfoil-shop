@@ -8,6 +8,9 @@ import manaBridge, { requireAuth } from "./manaBridge.js";
 import { connectDB, saveGameCache, getGameCache } from "./database.js";
 import { tinfoilAuth } from "./authMiddleware.js";
 
+// ✅ IMPORTAÇÃO DO NOVO MÓDULO CEREBRAL
+import { loadTitleDB, parseGameInfo, getDbStatus } from "./titleDbService.js";
+
 // ES Modules __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,12 +53,13 @@ app.use((req, res, next) => {
 app.use(express.json()); // Necessário para ler o JSON do magnet link
 app.use(manaBridge);
 
-// ROTA DE DEBUG PÚBLICA (Para testar se o servidor está vivo sem senha)
+// Rota de Health agora consome o status do serviço externo
 app.get("/health", (req, res) => {
   res.json({
     status: "Online",
     time: new Date().toISOString(),
     games: cachedGames.length,
+    titleDb: getDbStatus(), // ✅ Usa a função do novo módulo
   });
 });
 
@@ -104,46 +108,18 @@ async function getDirectLink(path) {
   }
 }
 
-// 🔍 EXTRAÇÃO DE TITLE ID E VERSÃO (CRÍTICO PARA TINFOIL)
-function parseGameInfo(fileName) {
-  // 1. Extrai Title ID: Procura por [16 caracteres hexadecimais]
-  const regexId = /\[([0-9A-Fa-f]{16})\]/i;
-  let titleId = null;
-  const matchId = fileName.match(regexId);
-
-  if (matchId) {
-    titleId = matchId[1].toUpperCase();
-  }
-
-  // 2. Extrai Versão: Procura por [v12345] ou (v12345)
-  // Essencial para a aba "New Games" funcionar
-  const regexVersion = /[\[\(]v(\d+)[\]\)]/i;
-  let version = 0; // Se não achar, assume 0 (Base Game)
-  const matchVersion = fileName.match(regexVersion);
-
-  if (matchVersion) {
-    version = parseInt(matchVersion[1], 10);
-  }
-
-  // 3. Limpa o nome visualmente
-  let cleanName = fileName
-    .replace(/\.(nsp|nsz|xci)$/i, "")
-    .replace(regexId, "")
-    .replace(regexVersion, "")
-    .replace(/\s*\([0-9.]+\s*(GB|MB)\)/gi, "")
-    .replace(/\[\s*\]/g, "")
-    .replace(/\(\s*\)/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return { name: cleanName, id: titleId, version };
-}
+// (A função parseGameInfo antiga foi removida daqui pois agora vem do import)
 
 async function buildGameIndex() {
   if (isIndexing) return;
   isIndexing = true;
   indexingProgress = "Escaneando Dropbox...";
   log.info("🚀 INICIANDO INDEXAÇÃO...");
+
+  // ✅ Garante que o Cérebro está carregado antes de processar
+  if (getDbStatus().startsWith("Vazio")) {
+    await loadTitleDB();
+  }
 
   try {
     let allFiles = [];
@@ -166,25 +142,26 @@ async function buildGameIndex() {
     );
     log.info(`📁 Encontrados ${validFiles.length} arquivos.`);
 
-    indexingProgress = "Gerando Links e Metadados...";
+    indexingProgress = "Processando Inteligência...";
     const games = await processInBatches(validFiles, 10, async (file) => {
       const directUrl = await getDirectLink(file.path_lower);
       if (!directUrl) return null;
 
-      // Extrai metadados do nome original do arquivo
+      // ✅ CHAMA O PARSER DO ARQUIVO SEPARADO
       const { name, id, version } = parseGameInfo(file.name);
 
-      // ⚠️ O PULO DO GATO BLINDADO:
-      // Enviamos 'id', 'titleId' (redundância) e 'filename' original
-      // Isso impede que o Tinfoil tente ler a URL "estragada" do Dropbox
+      if (!id) {
+        log.warn(`⚠️ DESCONHECIDO: "${name}". Verifique a grafia.`);
+      }
+
       return {
         url: directUrl,
         size: file.size,
         name: name,
-        id: id, // Padrão
-        titleId: id, // Redundância (algumas versões do Tinfoil preferem esse)
-        version: version, // Para "New Games"
-        filename: file.name, // Força o Tinfoil a usar este nome, não o da URL
+        id: id,
+        titleId: id,
+        version: version,
+        filename: file.name,
       };
     });
 
@@ -201,8 +178,6 @@ async function buildGameIndex() {
     isIndexing = false;
   }
 }
-
-// --- ROTAS DA LOJA (CORREÇÃO AQUI) ---
 
 // --- ROTAS DA LOJA ---
 app.get(["/api", "/api/"], (req, res) => {
@@ -247,6 +222,10 @@ app.get("/bridge/games", requireAuth, (req, res) => {
 
 async function startServer() {
   await connectDB();
+
+  // ✅ Inicializa o Cérebro no Startup
+  await loadTitleDB();
+
   const savedCache = await getGameCache();
   if (savedCache.games.length > 0) {
     cachedGames = savedCache.games;
