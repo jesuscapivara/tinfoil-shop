@@ -104,6 +104,8 @@ async function getDirectLink(path) {
     cdnUrl.searchParams.delete("preview");
     return cdnUrl.toString();
   } catch (e) {
+    // Log silencioso - muitos erros podem ser rate limit, não queremos poluir o console
+    // Se precisar debug, descomente: log.warn(`Erro ao gerar link para ${path}: ${e.message}`);
     return null;
   }
 }
@@ -123,18 +125,32 @@ async function buildGameIndex() {
 
   try {
     let allFiles = [];
+    let pageCount = 1;
     let response = await dbx.filesListFolder({
       path: ROOT_GAMES_FOLDER,
       recursive: true,
       limit: 2000,
     });
     allFiles = allFiles.concat(response.result.entries);
+    log.info(
+      `📄 Página ${pageCount}: ${response.result.entries.length} itens (Total: ${allFiles.length})`
+    );
+
     while (response.result.has_more) {
+      pageCount++;
       response = await dbx.filesListFolderContinue({
         cursor: response.result.cursor,
       });
       allFiles = allFiles.concat(response.result.entries);
+      log.info(
+        `📄 Página ${pageCount}: ${response.result.entries.length} itens (Total: ${allFiles.length})`
+      );
+
+      // Pequeno delay para não sobrecarregar a API do Dropbox
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+
+    log.info(`📁 Total de itens listados do Dropbox: ${allFiles.length}`);
 
     const validFiles = allFiles.filter(
       (entry) =>
@@ -143,34 +159,77 @@ async function buildGameIndex() {
     log.info(`📁 Encontrados ${validFiles.length} arquivos.`);
 
     indexingProgress = "Processando Inteligência...";
-    const games = await processInBatches(validFiles, 10, async (file) => {
-      const directUrl = await getDirectLink(file.path_lower);
-      if (!directUrl) return null;
 
-      // ✅ CHAMA O PARSER DO ARQUIVO SEPARADO
-      const { name, id, version } = parseGameInfo(file.name);
+    // ✅ Processamento em lotes com progresso incremental
+    const BATCH_SIZE = 15; // Lotes de 15 para não sobrecarregar
+    let processedCount = 0;
+    let games = [];
 
-      if (!id) {
-        log.warn(`⚠️ DESCONHECIDO: "${name}". Verifique a grafia.`);
+    for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
+      const batch = validFiles.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(validFiles.length / BATCH_SIZE);
+
+      indexingProgress = `Processando lote ${batchNum}/${totalBatches} (${processedCount}/${validFiles.length} jogos)...`;
+      log.info(
+        `📦 Processando lote ${batchNum}/${totalBatches} (${batch.length} arquivos)`
+      );
+
+      const batchResults = await Promise.all(
+        batch.map(async (file) => {
+          try {
+            const directUrl = await getDirectLink(file.path_lower);
+            if (!directUrl) {
+              log.warn(`⚠️ Falha ao gerar link: ${file.name}`);
+              return null;
+            }
+
+            // ✅ CHAMA O PARSER DO ARQUIVO SEPARADO
+            const { name, id, version } = parseGameInfo(file.name);
+
+            if (!id) {
+              log.warn(`⚠️ DESCONHECIDO: "${name}". Verifique a grafia.`);
+            }
+
+            processedCount++;
+            return {
+              url: directUrl,
+              size: file.size,
+              name: name,
+              id: id,
+              titleId: id,
+              version: version,
+              filename: file.name,
+            };
+          } catch (err) {
+            log.error(`❌ Erro ao processar ${file.name}:`, err.message);
+            return null;
+          }
+        })
+      );
+
+      games = games.concat(batchResults.filter((g) => g !== null));
+
+      // Delay entre lotes para não sobrecarregar
+      if (i + BATCH_SIZE < validFiles.length) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
+    }
 
-      return {
-        url: directUrl,
-        size: file.size,
-        name: name,
-        id: id,
-        titleId: id,
-        version: version,
-        filename: file.name,
-      };
-    });
-
-    cachedGames = games.filter((g) => g !== null);
+    cachedGames = games;
     lastCacheTime = Date.now();
     await saveGameCache(cachedGames);
 
-    log.info(`✅ INDEXAÇÃO CONCLUÍDA! ${cachedGames.length} jogos.`);
-    indexingProgress = "Concluído";
+    const successCount = cachedGames.length;
+    const failedCount = validFiles.length - successCount;
+
+    log.info(`✅ INDEXAÇÃO CONCLUÍDA!`);
+    log.info(`   📊 Estatísticas:`);
+    log.info(`   ✅ Jogos indexados: ${successCount}`);
+    log.info(`   ❌ Falhas: ${failedCount}`);
+    log.info(`   📁 Total de arquivos: ${validFiles.length}`);
+
+    indexingProgress = `Concluído (${successCount}/${validFiles.length} jogos)`;
   } catch (e) {
     log.error("FALHA INDEXAÇÃO:", e);
     indexingProgress = `Erro: ${e.message || "Erro desconhecido"}`;
