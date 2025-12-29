@@ -73,6 +73,20 @@ let indexingProgress = "0%";
 let lastCacheTime = 0;
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hora
 
+// ✅ Função para recarregar cache do banco (usada após indexação incremental)
+export async function refreshCacheFromDB() {
+  try {
+    const savedCache = await getGameCache();
+    if (savedCache.games.length > 0) {
+      cachedGames = savedCache.games;
+      lastCacheTime = savedCache.lastUpdate || Date.now();
+      log.info(`🔄 Cache em memória atualizado: ${cachedGames.length} jogos`);
+    }
+  } catch (err) {
+    log.error("Erro ao recarregar cache do banco:", err.message);
+  }
+}
+
 // --- FUNÇÕES AUXILIARES ---
 
 async function processInBatches(items, batchSize, fn) {
@@ -250,8 +264,19 @@ async function buildGameIndex() {
 }
 
 // --- ROTAS DA LOJA ---
-app.get(["/api", "/api/"], (req, res) => {
-  if (cachedGames.length === 0 && !isIndexing) buildGameIndex();
+app.get(["/api", "/api/"], async (req, res) => {
+  // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
+  if (cachedGames.length === 0 && !isIndexing) {
+    const savedCache = await getGameCache();
+    if (savedCache.games.length > 0) {
+      cachedGames = savedCache.games;
+      lastCacheTime = savedCache.lastUpdate || Date.now();
+      log.info(`🔄 Cache recarregado do banco: ${cachedGames.length} jogos`);
+    } else {
+      // Se o banco também está vazio, inicia indexação completa
+      buildGameIndex();
+    }
+  }
 
   if (isIndexing && cachedGames.length === 0) {
     return res.json({

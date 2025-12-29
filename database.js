@@ -327,6 +327,39 @@ export async function getGameCache() {
 }
 
 // ═══════════════════════════════════════════════
+// INDEXAÇÃO INCREMENTAL (Event-Driven)
+// ═══════════════════════════════════════════════
+
+export async function addOrUpdateGame(gameData) {
+  if (!isConnected) return false;
+
+  try {
+    // Upsert: Se existe atualiza, se não existe cria
+    await GameCache.findOneAndUpdate(
+      { path: gameData.path }, // Busca pelo caminho do arquivo (chave única)
+      {
+        ...gameData,
+        indexedAt: new Date(),
+      },
+      { upsert: true, new: true }
+    );
+
+    // Atualiza o timestamp global para outros serviços saberem que houve mudança
+    await SystemMeta.findOneAndUpdate(
+      { key: "lastIndexTime" },
+      { value: new Date().toISOString(), updatedAt: new Date() },
+      { upsert: true }
+    );
+
+    console.log(`[DB] 🎯 Jogo indexado incrementalmente: ${gameData.name}`);
+    return true;
+  } catch (err) {
+    console.error("[DB] ❌ Erro na indexação incremental:", err.message);
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════
 // FUNÇÕES AUXILIARES - SYSTEM META
 // ═══════════════════════════════════════════════
 

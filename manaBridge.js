@@ -8,7 +8,11 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { loginView } from "./frontend/views/login.js";
 import { dashboardView } from "./frontend/views/dashboard.js";
-import { saveDownloadHistory, getDownloadHistory } from "./database.js";
+import {
+  saveDownloadHistory,
+  getDownloadHistory,
+  addOrUpdateGame,
+} from "./database.js";
 import {
   createUser,
   findUserByEmail,
@@ -18,6 +22,7 @@ import {
   User,
 } from "./database.js";
 import { sendNewUserAlert, sendApprovalEmail } from "./emailService.js";
+import { parseGameInfo } from "./titleDbService.js";
 
 dotenv.config();
 
@@ -129,8 +134,7 @@ export const requireAuth = async (req, res, next) => {
   if (token) {
     try {
       token = decodeURIComponent(token);
-    } catch (e) {
-    }
+    } catch (e) {}
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
@@ -218,8 +222,7 @@ router.get("/", async (req, res) => {
           return res.redirect("/admin");
         }
       }
-    } catch (err) {
-    }
+    } catch (err) {}
   }
 
   // Se não tem token válido, vai para login
@@ -305,14 +308,13 @@ router.post("/bridge/auth", async (req, res) => {
 router.get("/bridge/me", requireAuth, async (req, res) => {
   const DOMAIN = process.env.DOMINIO || "capivara.rossetti.eng.br";
 
-
   if (req.user.role === "admin") {
     return res.json({
       email: ADMIN_EMAIL,
       isAdmin: true,
       isApproved: true,
       tinfoilUser: "admin",
-      tinfoilPass: "*********", 
+      tinfoilPass: "*********",
       host: `${DOMAIN}/api`,
       protocol: "https",
     });
@@ -666,6 +668,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
               activeDownloads[id].currentFile = file.name;
               activeDownloads[id].fileIndex = i + 1;
 
+              // 1. Upload do Arquivo (Mantém como está)
               await uploadFileToDropbox(
                 file,
                 destPath,
@@ -673,6 +676,40 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
                 gameFiles.length,
                 i
               );
+
+              // ==========================================================
+              // 🚀 NOVA ESTRATÉGIA: INDEXAÇÃO AUTOMÁTICA (AUTO-INDEX)
+              // ==========================================================
+              try {
+                log(`   🔍 Auto-Indexando: ${file.name}...`, "INDEX");
+
+                // 1. Gera Link Direto
+                const directUrl = await getDirectLink(destPath);
+
+                if (directUrl) {
+                  // 2. Inteligência: Extrai ID, Versão e Nome Limpo
+                  const meta = parseGameInfo(file.name);
+
+                  // 3. Salva no Banco (Instantâneo)
+                  await addOrUpdateGame({
+                    url: directUrl,
+                    size: file.length,
+                    name: meta.name,
+                    id: meta.id,
+                    titleId: meta.id,
+                    version: meta.version,
+                    filename: file.name,
+                    path: destPath.toLowerCase(), // Importante para upsert funcionar
+                  });
+                }
+              } catch (idxErr) {
+                // Não paramos o fluxo se a indexação falhar, apenas logamos
+                log(
+                  `   ⚠️ Falha no Auto-Index (O jogo foi upado, mas não indexado): ${idxErr.message}`,
+                  "WARN"
+                );
+              }
+              // ==========================================================
 
               totalUploaded += file.length;
               const uploadProgress = Math.floor(
@@ -694,6 +731,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             log(`🎉 TODOS OS UPLOADS CONCLUÍDOS!`, "SUCCESS");
             log(`   Pasta: ${gameFolderName}`, "SUCCESS");
             log(`   Arquivos: ${gameFiles.length}`, "SUCCESS");
+            log(`   ✅ Jogos indexados automaticamente no banco`, "SUCCESS");
             log(`═══════════════════════════════════════════════`, "SUCCESS");
 
             // Marca como concluído
@@ -787,6 +825,38 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
       setTimeout(() => onDownloadComplete(id), 5000);
     }
   }, 300000);
+}
+
+// ═══════════════════════════════════════════════
+// HELPER: GERA LINK DIRETO DO DROPBOX
+// ═══════════════════════════════════════════════
+
+async function getDirectLink(path) {
+  try {
+    let sharedLink = "";
+    // Tenta listar primeiro (mais rápido/seguro contra rate limit)
+    const listResponse = await dbx.sharingListSharedLinks({ path: path });
+
+    if (listResponse.result.links.length > 0) {
+      sharedLink = listResponse.result.links[0].url;
+    } else {
+      // Cria se não existir
+      const createResponse = await dbx.sharingCreateSharedLinkWithSettings({
+        path: path,
+      });
+      sharedLink = createResponse.result.url;
+    }
+
+    // Transforma em link de download direto (CDN)
+    const cdnUrl = new URL(sharedLink);
+    cdnUrl.hostname = "dl.dropboxusercontent.com";
+    cdnUrl.searchParams.delete("dl");
+    cdnUrl.searchParams.delete("preview");
+    return cdnUrl.toString();
+  } catch (e) {
+    console.error(`[BRIDGE] ❌ Erro ao gerar link para ${path}:`, e.message);
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════════════
