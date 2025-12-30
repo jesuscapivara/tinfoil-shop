@@ -569,6 +569,10 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         );
         log(`   Peers conectados: ${torrent.numPeers}`, "TORRENT");
 
+        // Atualiza fase para "checking" (verificando duplicatas)
+        activeDownloads[id].phase = "checking";
+        activeDownloads[id].name = torrent.name;
+
         // Lista TODOS os arquivos
         log(`📁 LISTA COMPLETA DE ARQUIVOS:`, "TORRENT");
         torrent.files.forEach((f, i) => {
@@ -614,19 +618,19 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             // Destrói o torrent imediatamente para não baixar nada
             safeDestroyTorrent(torrent);
 
-            // Remove da lista ativa após 1 minuto (auto-remoção)
+            // Remove da lista ativa automaticamente após 3 segundos (mais rápido para duplicatas)
             setTimeout(() => {
               if (
                 activeDownloads[id] &&
                 activeDownloads[id].phase === "error"
               ) {
                 log(
-                  `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
+                  `⏰ Auto-remoção: Download ${id} removido (duplicata detectada)`,
                   "CLEANUP"
                 );
                 onDownloadComplete(id);
               }
-            }, 60000); // 1 minuto = 60000ms
+            }, 3000); // 3 segundos para duplicatas
             return; // 🛑 PARA TUDO AQUI
           }
         }
@@ -640,11 +644,13 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             : (totalGameSize / 1024 / 1024).toFixed(2) + " MB";
 
         activeDownloads[id].name = torrent.name;
-        activeDownloads[id].phase = "downloading";
         activeDownloads[id].total = totalSizeStr;
         activeDownloads[id].uploadTotal = totalSizeStr;
         activeDownloads[id].peers = torrent.numPeers;
         activeDownloads[id].totalFiles = gameFiles.length;
+
+        // Muda para "connecting" após verificar duplicatas (aguardando conexão com peers)
+        activeDownloads[id].phase = "connecting";
 
         if (gameFiles.length === 0) {
           log(`❌ ERRO: Nenhum arquivo .nsp/.nsz/.xci encontrado!`, "ERROR");
@@ -712,7 +718,11 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
           activeDownloads[id].downloaded = formatBytes(downloaded);
           activeDownloads[id].peers = torrent.numPeers;
           activeDownloads[id].downloadEta = formatTime(timeRemaining);
-          activeDownloads[id].phase = "downloading";
+
+          // Muda para "downloading" quando começar a baixar (progress > 0)
+          if (progress > 0 && activeDownloads[id].phase === "connecting") {
+            activeDownloads[id].phase = "downloading";
+          }
 
           // Log a cada 10%
           if (progress >= lastLoggedProgress + 10) {
@@ -1444,7 +1454,7 @@ function processQueue() {
   activeDownloads[next.id] = {
     id: next.id,
     name: next.name,
-    phase: "connecting",
+    phase: "checking", // Começa verificando duplicatas
     startedAt: new Date().toISOString(),
     source: next.source,
     // Download
