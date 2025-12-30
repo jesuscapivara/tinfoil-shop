@@ -53,10 +53,14 @@ app.use(
       }
 
       // 3. Desenvolvimento: Permite localhost em QUALQUER porta (Vite usa 5173, 5174...)
-      if (isDev && (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:"))) {
+      if (
+        isDev &&
+        (origin.startsWith("http://localhost:") ||
+          origin.startsWith("http://127.0.0.1:"))
+      ) {
         return callback(null, true);
       }
-      
+
       // 4. Domínios específicos legados/extras
       const allowedDomains = ["https://capivara.rossetti.eng.br"];
       if (allowedDomains.includes(origin)) {
