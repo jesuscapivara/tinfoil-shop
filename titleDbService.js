@@ -92,22 +92,65 @@ export async function loadTitleDB() {
       entries.forEach((game) => {
         if (!game.id || !game.name) return;
 
-        // Estratégia de Indexação Dupla para Auto-Discovery
+        // Estratégia de Indexação Múltipla para Auto-Discovery
+        // Indexa o mesmo jogo com várias chaves diferentes para aumentar chances de match
 
         // 1. Chave Normalizada (ex: "supermarioodyssey")
         const cleanName = normalize(game.name);
         if (cleanName) {
-          // Só sobrescreve se ainda não existe (prioridade para a primeira fonte)
           if (!titleDbMap.has(cleanName)) {
             titleDbMap.set(cleanName, game.id);
           }
         }
 
-        // 2. Chave Exata Lowercase (ex: "super mario odyssey")
-        // Útil para matches parciais mais precisos
+        // 2. Chave Exata Lowercase (ex: "super mario odyssey™")
         const exactName = game.name.toLowerCase();
         if (!titleDbMap.has(exactName)) {
           titleDbMap.set(exactName, game.id);
+        }
+
+        // 3. Chave sem símbolos especiais (remove ™, ©, etc)
+        const withoutSymbols = game.name
+          .toLowerCase()
+          .replace(/[™©®]/g, "")
+          .trim();
+        if (
+          withoutSymbols &&
+          withoutSymbols !== exactName &&
+          !titleDbMap.has(withoutSymbols)
+        ) {
+          titleDbMap.set(withoutSymbols, game.id);
+        }
+
+        // 4. Chave normalizada sem símbolos
+        const normalizedWithoutSymbols = normalize(withoutSymbols);
+        if (
+          normalizedWithoutSymbols &&
+          normalizedWithoutSymbols !== cleanName &&
+          !titleDbMap.has(normalizedWithoutSymbols)
+        ) {
+          titleDbMap.set(normalizedWithoutSymbols, game.id);
+        }
+
+        // 5. Indexa também por palavras principais (primeiras 2-3 palavras)
+        const words = game.name
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
+        if (words.length >= 2) {
+          const keyPhrase = words.slice(0, 3).join(" ");
+          if (keyPhrase && !titleDbMap.has(keyPhrase)) {
+            titleDbMap.set(keyPhrase, game.id);
+          }
+
+          const keyPhrase2 = words.slice(0, 2).join(" ");
+          if (
+            keyPhrase2 &&
+            keyPhrase2 !== keyPhrase &&
+            !titleDbMap.has(keyPhrase2)
+          ) {
+            titleDbMap.set(keyPhrase2, game.id);
+          }
         }
 
         totalProcessed++;
@@ -178,34 +221,88 @@ export function parseGameInfo(fileName) {
 
 /**
  * Busca Title ID pelo nome do jogo (para jogos da busca do Telegram)
- * @param {string} gameName - Nome do jogo (ex: "Mario Kart 8 Deluxe")
+ * @param {string} gameName - Nome do jogo (ex: "Mario Kart 8 Deluxe [🇧🇷MOD]")
  * @returns {string|null} - Title ID se encontrado, null caso contrário
  */
 export function findTitleIdByName(gameName) {
   if (!gameName || titleDbMap.size === 0) return null;
 
-  // Normaliza o nome para busca
-  const normalized = normalize(gameName);
+  // 1. Limpa o nome: remove emojis, flags, modificadores como [MOD], [🇧🇷MOD], etc
+  let cleanName = gameName
+    .replace(/\[🇧🇷MOD\]/gi, "")
+    .replace(/\[MOD\]/gi, "")
+    .replace(/\[.*?\]/g, "") // Remove qualquer coisa entre colchetes
+    .replace(/\(.*?\)/g, "") // Remove qualquer coisa entre parênteses
+    .replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Remove emojis Unicode
+    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, "") // Remove flags Unicode
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanName) return null;
+
+  // 2. Tenta busca normalizada (remove espaços e símbolos)
+  const normalized = normalize(cleanName);
   if (normalized && titleDbMap.has(normalized)) {
     return titleDbMap.get(normalized);
   }
 
-  // Fallback: busca exata lowercase
-  const exactName = gameName.toLowerCase();
+  // 3. Tenta busca exata lowercase
+  const exactName = cleanName.toLowerCase();
   if (titleDbMap.has(exactName)) {
     return titleDbMap.get(exactName);
   }
 
-  // Tenta busca parcial (remove palavras comuns)
-  const cleanName = gameName
+  // 4. Tenta sem símbolos especiais (™, ©, etc)
+  const withoutSymbols = cleanName.toLowerCase().replace(/[™©®]/g, "").trim();
+  if (withoutSymbols && titleDbMap.has(withoutSymbols)) {
+    return titleDbMap.get(withoutSymbols);
+  }
+
+  // 5. Tenta normalizada sem símbolos
+  const normalizedWithoutSymbols = normalize(withoutSymbols);
+  if (normalizedWithoutSymbols && titleDbMap.has(normalizedWithoutSymbols)) {
+    return titleDbMap.get(normalizedWithoutSymbols);
+  }
+
+  // 6. Tenta remover palavras comuns e buscar novamente
+  const withoutCommonWords = cleanName
     .toLowerCase()
-    .replace(/\b(the|a|an|and|or|but|in|on|at|to|for|of|with|by)\b/g, "")
+    .replace(
+      /\b(the|a|an|and|or|but|in|on|at|to|for|of|with|by|vs|versus|plus|and)\b/g,
+      ""
+    )
     .replace(/\s+/g, " ")
     .trim();
 
-  const cleanNormalized = normalize(cleanName);
-  if (cleanNormalized && titleDbMap.has(cleanNormalized)) {
-    return titleDbMap.get(cleanNormalized);
+  if (withoutCommonWords) {
+    const withoutCommonNormalized = normalize(withoutCommonWords);
+    if (withoutCommonNormalized && titleDbMap.has(withoutCommonNormalized)) {
+      return titleDbMap.get(withoutCommonNormalized);
+    }
+  }
+
+  // 7. Busca parcial: tenta encontrar por palavras-chave principais
+  // Pega as primeiras 2-3 palavras significativas
+  const words = cleanName
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+  if (words.length >= 2) {
+    // Tenta combinações de palavras principais (já indexadas durante o carregamento)
+    const keyPhrases = [
+      words.slice(0, 3).join(" "), // Primeiras 3 palavras
+      words.slice(0, 2).join(" "), // Primeiras 2 palavras
+    ];
+
+    for (const phrase of keyPhrases) {
+      if (titleDbMap.has(phrase)) {
+        return titleDbMap.get(phrase);
+      }
+      const phraseNormalized = normalize(phrase);
+      if (phraseNormalized && titleDbMap.has(phraseNormalized)) {
+        return titleDbMap.get(phraseNormalized);
+      }
+    }
   }
 
   return null;
