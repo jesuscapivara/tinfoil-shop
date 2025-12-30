@@ -628,6 +628,8 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
                   `⏰ Auto-remoção: Download ${id} removido (duplicata detectada)`,
                   "CLEANUP"
                 );
+                // 🔥 CRÍTICO: Remove o item de activeDownloads ANTES de processar a fila
+                delete activeDownloads[id];
                 onDownloadComplete(id);
               }
             }, 10000); // 10 segundos para duplicatas (alinhado com countdown do frontend)
