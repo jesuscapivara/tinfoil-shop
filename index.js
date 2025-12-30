@@ -70,6 +70,14 @@ app.use(
         return callback(null, true);
       }
 
+      // 5. Permite localhost:3000 mesmo em produção (para desenvolvimento local do frontend)
+      if (
+        origin === "http://localhost:3000" ||
+        origin === "http://127.0.0.1:3000"
+      ) {
+        return callback(null, true);
+      }
+
       callback(new Error(`CORS blocked origin: ${origin}`));
     },
     credentials: true, // Essencial para cookies/auth headers
