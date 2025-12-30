@@ -1889,6 +1889,46 @@ router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
       });
     }
 
+    // 🛡️ VERIFICAÇÃO PRÉVIA DE DUPLICATAS (antes de adicionar à fila)
+    // Tenta extrair titleId do nome do arquivo para verificar no banco
+    try {
+      const filename = torrentData.filename || name;
+      const meta = parseGameInfo(filename);
+
+      if (meta.id && meta.version) {
+        log(
+          `🔍 Verificando duplicata prévia: ${meta.id} v${meta.version}`,
+          "DUPLICATE"
+        );
+        const duplicate = await checkGameExists(
+          filename,
+          meta.id,
+          meta.version
+        );
+
+        if (duplicate) {
+          const reason =
+            duplicate.type === "filename"
+              ? `Arquivo já existe: ${filename}`
+              : `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+
+          log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+          return res.status(409).json({
+            error: `Este jogo já existe no sistema: ${reason}`,
+            duplicate: true,
+          });
+        }
+      }
+    } catch (preCheckError) {
+      // Se a verificação prévia falhar, continua normalmente
+      // A verificação completa acontecerá depois que o torrent for processado
+      log(
+        `⚠️ Verificação prévia falhou (continuando): ${preCheckError.message}`,
+        "WARN"
+      );
+    }
+
     // Cria item da fila no formato esperado
     const queueItem = {
       id,
