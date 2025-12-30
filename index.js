@@ -388,7 +388,40 @@ async function buildGameIndex() {
 // --- ROTAS DA LOJA ---
 // Endpoint principal da API Tinfoil (requer autenticação)
 // Funciona na raiz (/) para api.rossetti.eng.br e também em /api para compatibilidade
-app.get(["/", "/api", "/api/"], tinfoilAuth, async (req, res) => {
+// Aplica autenticação diretamente na rota da raiz, e /api já tem via app.use
+app.get("/", tinfoilAuth, async (req, res) => {
+  // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
+  if (cachedGames.length === 0 && !isIndexing) {
+    const savedCache = await getGameCache();
+    if (savedCache.games.length > 0) {
+      cachedGames = savedCache.games;
+      lastCacheTime = savedCache.lastUpdate || Date.now();
+      log.info(`🔄 Cache recarregado do banco: ${cachedGames.length} jogos`);
+    } else {
+      // Se o banco também está vazio, inicia indexação completa
+      buildGameIndex();
+    }
+  }
+
+  if (isIndexing && cachedGames.length === 0) {
+    return res.json({
+      success: `Loja Iniciando... (${indexingProgress})`,
+      files: [],
+    });
+  }
+
+  // Tinfoil lê esse JSON. O campo "id" ajuda ele a achar a capa sozinho no Switch!
+  const counts = countGamesByType(cachedGames);
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    files: cachedGames,
+    success: `Capivara Shop (${counts.base} jogos base, ${counts.dlc} DLCs, ${counts.update} updates)`,
+    stats: counts, // Estatísticas detalhadas
+  });
+});
+
+// Rota /api também (compatibilidade - middleware já aplicado via app.use)
+app.get(["/api", "/api/"], async (req, res) => {
   // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
   if (cachedGames.length === 0 && !isIndexing) {
     const savedCache = await getGameCache();
@@ -456,8 +489,14 @@ async function startServer() {
     cachedGames = savedCache.games;
     lastCacheTime = savedCache.lastUpdate || Date.now();
   }
-  app.listen(PORT, () => {
+  app.listen(PORT, "0.0.0.0", () => {
     log.info(`🚀 Mana Shop rodando na porta ${PORT}`);
+    log.info(`🌐 Servidor escutando em todas as interfaces (0.0.0.0:${PORT})`);
+    log.info(`📡 Endpoints disponíveis:`);
+    log.info(`   - GET / (Tinfoil API - requer auth)`);
+    log.info(`   - GET /api (Tinfoil API - requer auth)`);
+    log.info(`   - GET /health (público)`);
+    log.info(`   - GET /indexing-status (público)`);
     if (
       cachedGames.length === 0 ||
       Date.now() - lastCacheTime > CACHE_DURATION
