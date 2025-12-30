@@ -178,26 +178,65 @@ export async function fetchGameTorrent(downloadCommand) {
             throw new Error("Parse falhou: Objeto torrentInfo inválido.");
           }
 
-          // Constrói magnet link com trackers adicionais para melhor conectividade
-          const trackers = [
-            "http://retracker.local/announce",
-            "http://bt2.t-ru.org/ann?pk=e325e7a94cd8e7a73e5696b21b6c448a",
-            "udp://tracker.opentrackr.org:1337/announce",
-            "udp://open.stealth.si:80/announce",
-            "udp://tracker.torrent.eu.org:451/announce",
-            "udp://tracker.coppersurfer.tk:6969/announce",
-            "udp://tracker.leechers-paradise.org:6969/announce",
-            "udp://tracker.internetwarriors.net:1337/announce",
-            "udp://exodus.desync.com:6969/announce",
-            "udp://tracker.cyberia.is:6969/announce",
-            "udp://tracker.openbittorrent.com:80/announce",
-            "udp://tracker.publicbt.com:80/announce",
-          ];
+          // Extrai trackers do arquivo .torrent original
+          const trackers = new Set(); // Usa Set para evitar duplicatas
+
+          // Adiciona trackers do announce (pode ser string ou array)
+          if (torrentInfo.announce) {
+            if (Array.isArray(torrentInfo.announce)) {
+              torrentInfo.announce.forEach((tr) => trackers.add(tr));
+            } else {
+              trackers.add(torrentInfo.announce);
+            }
+          }
+
+          // Adiciona trackers do announceList (array de arrays)
+          if (
+            torrentInfo.announceList &&
+            Array.isArray(torrentInfo.announceList)
+          ) {
+            torrentInfo.announceList.forEach((trackerGroup) => {
+              if (Array.isArray(trackerGroup)) {
+                trackerGroup.forEach((tr) => trackers.add(tr));
+              } else {
+                trackers.add(trackerGroup);
+              }
+            });
+          }
+
+          // Converte Set para Array e adiciona trackers essenciais se não houver nenhum
+          let trackersArray = Array.from(trackers);
+
+          // Se não encontrou trackers no arquivo, adiciona os essenciais
+          if (trackersArray.length === 0) {
+            console.log(
+              "[TELEGRAM] ⚠️ Nenhum tracker encontrado no arquivo, usando trackers padrão"
+            );
+            trackersArray = [
+              "http://retracker.local/announce",
+              "http://bt2.t-ru.org/ann?pk=e325e7a94cd8e7a73e5696b21b6c448a",
+            ];
+          } else {
+            // Adiciona os trackers essenciais no início da lista (se ainda não estiverem)
+            const essentialTrackers = [
+              "http://retracker.local/announce",
+              "http://bt2.t-ru.org/ann?pk=e325e7a94cd8e7a73e5696b21b6c448a",
+            ];
+            essentialTrackers.forEach((tr) => {
+              if (!trackersArray.includes(tr)) {
+                trackersArray.unshift(tr); // Adiciona no início
+              }
+            });
+          }
+
+          console.log(
+            `[TELEGRAM] 📡 ${trackersArray.length} tracker(s) extraído(s) do arquivo`
+          );
 
           const gameName = msg.file?.name?.replace(/\.torrent$/, "") || "Game";
           let magnetURI = `magnet:?xt=urn:btih:${torrentInfo.infoHash}`;
           magnetURI += `&dn=${encodeURIComponent(gameName)}`;
-          trackers.forEach(
+          trackersArray.forEach(
             (tr) => (magnetURI += `&tr=${encodeURIComponent(tr)}`)
           );
 
