@@ -178,11 +178,20 @@ export async function fetchGameTorrent(downloadCommand) {
             throw new Error("Parse falhou: Objeto torrentInfo inválido.");
           }
 
-          // Constrói magnet link
+          // Constrói magnet link com trackers adicionais para melhor conectividade
           const trackers = [
+            "http://retracker.local/announce",
+            "http://bt2.t-ru.org/ann?pk=e325e7a94cd8e7a73e5696b21b6c448a",
             "udp://tracker.opentrackr.org:1337/announce",
             "udp://open.stealth.si:80/announce",
             "udp://tracker.torrent.eu.org:451/announce",
+            "udp://tracker.coppersurfer.tk:6969/announce",
+            "udp://tracker.leechers-paradise.org:6969/announce",
+            "udp://tracker.internetwarriors.net:1337/announce",
+            "udp://exodus.desync.com:6969/announce",
+            "udp://tracker.cyberia.is:6969/announce",
+            "udp://tracker.openbittorrent.com:80/announce",
+            "udp://tracker.publicbt.com:80/announce",
           ];
 
           const gameName = msg.file?.name?.replace(/\.torrent$/, "") || "Game";

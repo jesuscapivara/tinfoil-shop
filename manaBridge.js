@@ -984,7 +984,18 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         if (activeDownloads[id]) {
           activeDownloads[id].error = err.message;
           activeDownloads[id].phase = "error";
+          activeDownloads[id].errorTimestamp = Date.now();
         }
+      });
+
+      // Handler para detectar quando o torrent está tentando conectar
+      torrentInstance.on("infoHash", () => {
+        log(`🔍 InfoHash detectado: ${torrentInstance.infoHash}`, "TORRENT");
+      });
+
+      // Handler para detectar quando o torrent está procurando peers
+      torrentInstance.on("tracker", (announce) => {
+        log(`🔍 Tracker anunciado: ${announce}`, "TORRENT");
       });
 
       log(`✅ Torrent instance criado`, "TORRENT");
@@ -992,6 +1003,17 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         `   InfoHash: ${torrentInstance.infoHash || "Aguardando conexão..."}`,
         "TORRENT"
       );
+
+      // Log adicional para debug
+      if (
+        typeof torrentInput === "string" &&
+        torrentInput.startsWith("magnet:")
+      ) {
+        const infoHashMatch = torrentInput.match(/btih:([a-zA-Z0-9]+)/i);
+        if (infoHashMatch) {
+          log(`   InfoHash esperado: ${infoHashMatch[1]}`, "TORRENT");
+        }
+      }
     } else {
       log(`⚠️ Torrent instance é null/undefined!`, "TORRENT");
     }
