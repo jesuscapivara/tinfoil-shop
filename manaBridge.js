@@ -530,14 +530,29 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
   log(`🚀 NOVO TORRENT INICIADO`, "TORRENT");
   log(`   ID: ${id}`, "TORRENT");
   log(`   Tipo: ${inputType}`, "TORRENT");
+  log(
+    `   Input: ${
+      typeof torrentInput === "string"
+        ? torrentInput.substring(0, 100) + "..."
+        : "Buffer"
+    }`,
+    "TORRENT"
+  );
   log(`═══════════════════════════════════════════════`, "TORRENT");
 
   // Handler de erro do client.add
   try {
+    log(`📡 Tentando adicionar torrent ao WebTorrent...`, "TORRENT");
+    log(`   Input type: ${typeof torrentInput}`, "TORRENT");
+    if (typeof torrentInput === "string") {
+      log(`   Magnet preview: ${torrentInput.substring(0, 80)}...`, "TORRENT");
+    }
+
     const torrentInstance = client.add(
       torrentInput,
       { path: "/tmp" },
       async (torrent) => {
+        log(`🔗 Callback do WebTorrent chamado!`, "TORRENT");
         // Armazena referência do torrent para cancelamento (tanto a instância quanto o objeto)
         activeDownloads[id].torrent = torrent;
         activeDownloads[id].torrentInstance = torrentInstance;
@@ -961,6 +976,25 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         });
       }
     );
+
+    // Adiciona handler de erro no torrentInstance (antes do callback ser chamado)
+    if (torrentInstance) {
+      torrentInstance.on("error", (err) => {
+        log(`❌ ERRO NO TORRENT INSTANCE ${id}: ${err.message}`, "TORRENT");
+        if (activeDownloads[id]) {
+          activeDownloads[id].error = err.message;
+          activeDownloads[id].phase = "error";
+        }
+      });
+
+      log(`✅ Torrent instance criado`, "TORRENT");
+      log(
+        `   InfoHash: ${torrentInstance.infoHash || "Aguardando conexão..."}`,
+        "TORRENT"
+      );
+    } else {
+      log(`⚠️ Torrent instance é null/undefined!`, "TORRENT");
+    }
   } catch (err) {
     log(`❌ ERRO ao adicionar torrent: ${err.message}`, "ERROR");
     activeDownloads[id].error = err.message;
