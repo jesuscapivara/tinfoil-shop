@@ -109,7 +109,7 @@ export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
       subject: "✅ Seu acesso foi APROVADO!",
       html: `
                 <div style="font-family: sans-serif; color: #333;">
-                    <h2>Bem-vindo à Mana Shop! 🎮</h2>
+                    <h2>Bem-vindo à Capivara Shop! 🎮</h2>
                     <p>Sua conta foi aprovada pelo administrador.</p>
                     <hr>
                     <h3>Suas Credenciais Tinfoil:</h3>

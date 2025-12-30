@@ -58,7 +58,7 @@ export async function tinfoilAuth(req, res, next) {
     console.log(`[AUTH] 🚫 Sem credenciais - retornando 401`);
     // Retornamos JSON direto. HTML trava o Tinfoil.
     return res.status(401).json({
-      error: "Mana Shop: Autenticação necessária (User/Pass)",
+      error: "Capivara Shop: Autenticação necessária (User/Pass)",
     });
   }
 

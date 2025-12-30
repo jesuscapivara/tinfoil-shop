@@ -10,7 +10,7 @@ export function loginTemplate() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mana Shop | Login</title>
+    <title>Capivara Shop | Login</title>
     <style>
         :root { 
             --bg: #0f172a; 
@@ -92,7 +92,7 @@ export function loginTemplate() {
 <body>
     <div class="login-card">
         <span class="logo">🎮</span>
-        <h2 id="formTitle">Mana Shop</h2>
+        <h2 id="formTitle">Capivara Shop</h2>
         <div id="error" class="error"></div>
         
         <form id="loginForm">
@@ -116,7 +116,7 @@ export function loginTemplate() {
             isLogin = !isLogin;
             document.getElementById('loginForm').style.display = isLogin ? 'block' : 'none';
             document.getElementById('registerForm').style.display = isLogin ? 'none' : 'block';
-            document.getElementById('formTitle').innerText = isLogin ? 'Mana Shop' : 'Solicitar Acesso';
+            document.getElementById('formTitle').innerText = isLogin ? 'Capivara Shop' : 'Solicitar Acesso';
             document.getElementById('error').classList.remove('show');
         }
 
@@ -208,7 +208,7 @@ export function dashboardTemplate() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mana Shop | Dashboard</title>
+    <title>Capivara Shop | Dashboard</title>
     <style>
         :root { 
             --bg: #0a0e14; 
