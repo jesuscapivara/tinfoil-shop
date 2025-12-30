@@ -1046,11 +1046,70 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
     }, 60000);
   }
 
-  // Timeout de 5 minutos
+  // Timeout de 1 minuto para recolocar na fila se não conectar aos pares
+  setTimeout(() => {
+    if (activeDownloads[id]?.phase === "connecting") {
+      log(
+        `⏰ TIMEOUT 1 MIN: Nenhum peer encontrado. Recolocando na fila...`,
+        "QUEUE"
+      );
+
+      // Salva informações do download para recolocar na fila
+      const download = activeDownloads[id];
+      if (!download) {
+        log(
+          `⚠️ Download ${id} não encontrado ao tentar recolocar na fila`,
+          "WARN"
+        );
+        return;
+      }
+
+      const originalInput = download.originalInput || torrentInput; // Usa o input original se disponível
+
+      // Destrói o torrent atual
+      try {
+        if (download.torrent) {
+          safeDestroyTorrent(download.torrent);
+        } else if (download.torrentInstance) {
+          safeDestroyTorrent(download.torrentInstance);
+        }
+      } catch (e) {
+        log(
+          `⚠️ Erro ao destruir torrent ao recolocar na fila: ${e.message}`,
+          "WARN"
+        );
+      }
+
+      // Remove de activeDownloads
+      delete activeDownloads[id];
+
+      // Cria novo item da fila com os mesmos dados
+      const queueItem = {
+        id: `requeue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Novo ID para evitar conflitos
+        name: download.name || "Download",
+        input: originalInput,
+        source: download.source || inputType || "magnet",
+        addedAt: new Date().toISOString(),
+      };
+
+      // Adiciona no final da fila
+      downloadQueue.push(queueItem);
+      log(
+        `📋 Download recolocado na fila: ${queueItem.name} (Posição: ${downloadQueue.length})`,
+        "QUEUE"
+      );
+
+      // Processa próximo da fila
+      onDownloadComplete(id);
+    }
+  }, 60000); // 1 minuto
+
+  // Timeout de 5 minutos (fallback para casos extremos)
   setTimeout(() => {
     if (activeDownloads[id]?.phase === "connecting") {
       log(`⏰ TIMEOUT: Nenhum peer encontrado após 5 minutos`, "ERROR");
-      activeDownloads[id].error = "Timeout: Nenhum peer encontrado";
+      activeDownloads[id].error =
+        "Timeout: Nenhum peer encontrado após múltiplas tentativas";
       activeDownloads[id].phase = "error";
       activeDownloads[id].errorTimestamp = Date.now();
       // Auto-remoção após 1 minuto
@@ -1060,6 +1119,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             `⏰ Auto-remoção: Download ${id} removido após 1 minuto de erro`,
             "CLEANUP"
           );
+          delete activeDownloads[id];
           onDownloadComplete(id);
         }
       }, 60000);
@@ -1459,6 +1519,7 @@ function processQueue() {
     phase: "checking", // Começa verificando duplicatas
     startedAt: new Date().toISOString(),
     source: next.source,
+    originalInput: next.input, // 🔥 Salva o input original para poder recolocar na fila
     // Download
     downloadPercent: 0,
     downloadSpeed: "-- MB/s",

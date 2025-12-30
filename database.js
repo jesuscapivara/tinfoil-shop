@@ -188,7 +188,11 @@ const downloadHistorySchema = new mongoose.Schema({
   folder: { type: String },
   duration: { type: Number }, // em segundos
   completedAt: { type: Date, default: Date.now },
-  source: { type: String, enum: ["magnet", "torrent-file"], default: "magnet" },
+  source: {
+    type: String,
+    enum: ["magnet", "torrent-file", "telegram_search"],
+    default: "magnet",
+  },
 });
 
 // ⚠️ ATUALIZAÇÃO CRÍTICA AQUI ⚠️
