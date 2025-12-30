@@ -29,10 +29,11 @@ async function loadTelegramClasses() {
 
   try {
     // Importações dinâmicas para compatibilidade com ES modules
-    const sessionsModule = await import("telegram/sessions");
+    // Usa caminhos completos para evitar erro de importação de diretório
+    const sessionsModule = await import("telegram/sessions/index.js");
     StringSessionClass = sessionsModule.StringSession;
 
-    const eventsModule = await import("telegram/events");
+    const eventsModule = await import("telegram/events/index.js");
     NewMessageClass = eventsModule.NewMessage;
 
     return {
