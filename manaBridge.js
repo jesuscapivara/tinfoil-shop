@@ -224,10 +224,42 @@ router.post("/bridge/register", async (req, res) => {
   }
 });
 
-// --- ROTA RAIZ: REDIRECIONAMENTO PARA O NOVO FRONTEND ---
+// --- ROTA RAIZ: INFORMAÇÕES DA API ---
 router.get("/", async (req, res) => {
-  // Redireciona para o novo frontend
-  res.redirect(FRONTEND_URL);
+  // Se for requisição de navegador (Accept: text/html), redireciona para o frontend
+  // Se for requisição de API (Accept: application/json ou sem Accept), retorna JSON
+  const acceptsHtml =
+    req.headers.accept && req.headers.accept.includes("text/html");
+
+  if (acceptsHtml) {
+    // Navegador: redireciona para o frontend
+    res.redirect(FRONTEND_URL);
+  } else {
+    // API/ferramentas: retorna informações da API
+    res.json({
+      name: "Tinfoil Shop API",
+      version: "1.0.0",
+      status: "online",
+      endpoints: {
+        public: [
+          "GET /health - Status de saúde do servidor",
+          "GET /indexing-status - Status da indexação",
+          "POST /bridge/auth - Autenticação",
+          "POST /bridge/register - Registro de usuário",
+        ],
+        protected: [
+          "GET /api - Lista de jogos (Tinfoil Auth)",
+          "GET /bridge/me - Dados do usuário (JWT)",
+          "GET /bridge/games - Lista de jogos (JWT)",
+          "POST /bridge/upload-torrent - Upload de torrent (JWT)",
+          "POST /bridge/search-games - Buscar jogos (JWT)",
+          "POST /bridge/download-from-search - Download via busca (JWT)",
+        ],
+      },
+      frontend: FRONTEND_URL,
+      documentation: `${FRONTEND_URL}/dashboard`,
+    });
+  }
 });
 
 // --- ROTAS DE AUTENTICAÇÃO ---
