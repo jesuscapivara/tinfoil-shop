@@ -405,9 +405,29 @@ export async function checkGameExists(filename, titleId, version) {
   try {
     // 1. Proteção contra Sobrescrita (Mesmo nome de arquivo)
     // Isso evita corromper o arquivo que já está no Dropbox
-    const byFilename = await GameCache.findOne({ filename: filename });
-    if (byFilename) {
-      return { type: "filename", found: byFilename };
+    // Busca case-insensitive e normalizada
+    const normalizedFilename = filename ? filename.trim() : null;
+    if (normalizedFilename) {
+      // Busca exata primeiro
+      let byFilename = await GameCache.findOne({
+        filename: normalizedFilename,
+      });
+
+      // Se não encontrar, tenta case-insensitive
+      if (!byFilename) {
+        byFilename = await GameCache.findOne({
+          filename: {
+            $regex: new RegExp(
+              `^${normalizedFilename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+              "i"
+            ),
+          },
+        });
+      }
+
+      if (byFilename) {
+        return { type: "filename", found: byFilename };
+      }
     }
 
     // 2. Proteção contra Duplicidade Lógica (Mesmo Jogo e Versão)

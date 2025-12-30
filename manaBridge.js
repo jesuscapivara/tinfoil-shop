@@ -1713,6 +1713,122 @@ router.post(
       "API"
     );
 
+    // 🛡️ VERIFICAÇÃO PRÉVIA DE DUPLICATAS (antes de adicionar à fila)
+    try {
+      // Importa parse-torrent dinamicamente
+      const parseTorrentModule = await import("parse-torrent");
+      const parseTorrent =
+        typeof parseTorrentModule.default === "function"
+          ? parseTorrentModule.default
+          : parseTorrentModule;
+
+      // Faz parse do torrent
+      const torrentInfo = await parseTorrent(req.file.buffer);
+
+      if (!torrentInfo || !torrentInfo.infoHash) {
+        log(`⚠️ Não foi possível fazer parse do torrent`, "WARN");
+      } else {
+        // Extrai nomes dos arquivos
+        const fileNames = [];
+        if (torrentInfo.files && Array.isArray(torrentInfo.files)) {
+          torrentInfo.files.forEach((file) => {
+            if (file.path) {
+              const fileName = Array.isArray(file.path)
+                ? file.path[file.path.length - 1]
+                : file.path;
+              fileNames.push(fileName);
+            } else if (file.name) {
+              fileNames.push(file.name);
+            }
+          });
+        } else if (
+          torrentInfo.info &&
+          torrentInfo.info.files &&
+          Array.isArray(torrentInfo.info.files)
+        ) {
+          torrentInfo.info.files.forEach((file) => {
+            if (file.path) {
+              const fileName = Array.isArray(file.path)
+                ? file.path[file.path.length - 1]
+                : file.path;
+              fileNames.push(fileName);
+            } else if (file.name) {
+              fileNames.push(file.name);
+            }
+          });
+        }
+
+        log(
+          `🔍 Verificando ${fileNames.length} arquivo(s) por duplicatas...`,
+          "DUPLICATE"
+        );
+
+        // Filtra apenas arquivos de jogo
+        const gameFiles = fileNames.filter((fileName) =>
+          fileName.match(/\.(nsp|nsz|xci)$/i)
+        );
+
+        if (gameFiles.length > 0) {
+          log(
+            `🎮 ${gameFiles.length} arquivo(s) de jogo encontrado(s) para verificação`,
+            "DUPLICATE"
+          );
+
+          // Verifica cada arquivo de jogo
+          for (const fileName of gameFiles) {
+            log(`   Verificando: ${fileName}`, "DUPLICATE");
+            const meta = parseGameInfo(fileName);
+
+            // Verifica por filename (normalizado)
+            const normalizedFileName = fileName.trim();
+            const duplicateByFilename = await checkGameExists(
+              normalizedFileName,
+              null,
+              null
+            );
+
+            if (duplicateByFilename) {
+              const reason = `Arquivo já existe: ${fileName}`;
+              log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+              return res.status(409).json({
+                error: `Este jogo já existe no sistema: ${reason}`,
+                duplicate: true,
+              });
+            }
+
+            // Se tiver titleId e versão, verifica também por lógica
+            if (meta.id && meta.version) {
+              const duplicateByLogic = await checkGameExists(
+                normalizedFileName,
+                meta.id,
+                meta.version
+              );
+
+              if (duplicateByLogic) {
+                const reason = `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+                log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+                return res.status(409).json({
+                  error: `Este jogo já existe no sistema: ${reason}`,
+                  duplicate: true,
+                });
+              }
+            }
+          }
+
+          log(`✅ Nenhuma duplicata encontrada, prosseguindo...`, "DUPLICATE");
+        }
+      }
+    } catch (preCheckError) {
+      // Se a verificação prévia falhar, continua normalmente
+      // A verificação completa acontecerá depois que o torrent for processado
+      log(
+        `⚠️ Verificação prévia falhou (continuando): ${preCheckError.message}`,
+        "WARN"
+      );
+    }
+
     // Cria item da fila
     const queueItem = {
       id,
@@ -1913,11 +2029,19 @@ router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
 
           // Verifica cada arquivo de jogo
           for (const fileName of gameFiles) {
+            log(`   Verificando: ${fileName}`, "DUPLICATE");
             const meta = parseGameInfo(fileName);
 
+            // Normaliza o nome do arquivo (trim, case insensitive)
+            const normalizedFileName = fileName.trim();
+
             // Verifica por filename primeiro
+            log(
+              `   Verificando por filename: "${normalizedFileName}"`,
+              "DUPLICATE"
+            );
             const duplicateByFilename = await checkGameExists(
-              fileName,
+              normalizedFileName,
               null,
               null
             );
@@ -1925,6 +2049,10 @@ router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
             if (duplicateByFilename) {
               const reason = `Arquivo já existe: ${fileName}`;
               log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+              log(
+                `   Arquivo encontrado no banco: ${duplicateByFilename.found?.filename}`,
+                "DUPLICATE"
+              );
 
               return res.status(409).json({
                 error: `Este jogo já existe no sistema: ${reason}`,
@@ -1932,10 +2060,12 @@ router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
               });
             }
 
+            log(`   ✅ Filename não encontrado no banco`, "DUPLICATE");
+
             // Se tiver titleId e versão, verifica também por lógica
             if (meta.id && meta.version) {
               const duplicateByLogic = await checkGameExists(
-                fileName,
+                normalizedFileName,
                 meta.id,
                 meta.version
               );
