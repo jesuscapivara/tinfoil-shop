@@ -1890,34 +1890,104 @@ router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
     }
 
     // 🛡️ VERIFICAÇÃO PRÉVIA DE DUPLICATAS (antes de adicionar à fila)
-    // Tenta extrair titleId do nome do arquivo para verificar no banco
+    // Verifica se algum arquivo do torrent já existe no banco
     try {
-      const filename = torrentData.filename || name;
-      const meta = parseGameInfo(filename);
+      const fileNames = torrentData.fileNames || [];
 
-      if (meta.id && meta.version) {
+      if (fileNames.length > 0) {
         log(
-          `🔍 Verificando duplicata prévia: ${meta.id} v${meta.version}`,
+          `🔍 Verificando ${fileNames.length} arquivo(s) por duplicatas...`,
           "DUPLICATE"
         );
-        const duplicate = await checkGameExists(
-          filename,
-          meta.id,
-          meta.version
+
+        // Filtra apenas arquivos de jogo (.nsp, .nsz, .xci)
+        const gameFiles = fileNames.filter((fileName) =>
+          fileName.match(/\.(nsp|nsz|xci)$/i)
         );
 
-        if (duplicate) {
-          const reason =
-            duplicate.type === "filename"
-              ? `Arquivo já existe: ${filename}`
-              : `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+        if (gameFiles.length > 0) {
+          log(
+            `🎮 ${gameFiles.length} arquivo(s) de jogo encontrado(s) para verificação`,
+            "DUPLICATE"
+          );
 
-          log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+          // Verifica cada arquivo de jogo
+          for (const fileName of gameFiles) {
+            const meta = parseGameInfo(fileName);
 
-          return res.status(409).json({
-            error: `Este jogo já existe no sistema: ${reason}`,
-            duplicate: true,
-          });
+            // Verifica por filename primeiro
+            const duplicateByFilename = await checkGameExists(
+              fileName,
+              null,
+              null
+            );
+
+            if (duplicateByFilename) {
+              const reason = `Arquivo já existe: ${fileName}`;
+              log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+              return res.status(409).json({
+                error: `Este jogo já existe no sistema: ${reason}`,
+                duplicate: true,
+              });
+            }
+
+            // Se tiver titleId e versão, verifica também por lógica
+            if (meta.id && meta.version) {
+              const duplicateByLogic = await checkGameExists(
+                fileName,
+                meta.id,
+                meta.version
+              );
+
+              if (duplicateByLogic) {
+                const reason = `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+                log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+                return res.status(409).json({
+                  error: `Este jogo já existe no sistema: ${reason}`,
+                  duplicate: true,
+                });
+              }
+            }
+          }
+
+          log(`✅ Nenhuma duplicata encontrada, prosseguindo...`, "DUPLICATE");
+        } else {
+          log(
+            `⚠️ Nenhum arquivo de jogo encontrado no torrent para verificação prévia`,
+            "WARN"
+          );
+        }
+      } else {
+        // Fallback: tenta extrair do nome do arquivo .torrent
+        const filename = torrentData.filename || name;
+        const meta = parseGameInfo(filename);
+
+        if (meta.id && meta.version) {
+          log(
+            `🔍 Verificando duplicata prévia (fallback): ${meta.id} v${meta.version}`,
+            "DUPLICATE"
+          );
+          const duplicate = await checkGameExists(
+            filename,
+            meta.id,
+            meta.version
+          );
+
+          if (duplicate) {
+            const reason =
+              duplicate.type === "filename"
+                ? `Arquivo já existe: ${filename}`
+                : `Jogo já cadastrado: ${meta.name} [v${meta.version}]`;
+
+            log(`🚫 BLOQUEADO ANTES DA FILA: ${reason}`, "DUPLICATE");
+
+            return res.status(409).json({
+              error: `Este jogo já existe no sistema: ${reason}`,
+              duplicate: true,
+            });
+          }
         }
       }
     } catch (preCheckError) {
