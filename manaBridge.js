@@ -29,6 +29,7 @@ import {
 } from "./database.js";
 import { sendNewUserAlert, sendApprovalEmail } from "./emailService.js";
 import { parseGameInfo } from "./titleDbService.js";
+import { searchGames, fetchGameTorrent } from "./telegramIndexer.js";
 
 dotenv.config();
 
@@ -1746,6 +1747,117 @@ router.post("/bridge/cancel/:id", requireAuth, (req, res) => {
   } catch (err) {
     log(`❌ Erro ao cancelar download: ${err.message}`, "ERROR");
     res.status(500).json({ error: "Erro ao cancelar download" });
+  }
+});
+
+// ═══════════════════════════════════════════════
+// TELEGRAM INDEXER - BUSCA E DOWNLOAD DE JOGOS
+// ═══════════════════════════════════════════════
+
+/**
+ * Busca jogos no bot do Telegram
+ * POST /bridge/search-games
+ * Body: { searchTerm: string }
+ */
+router.post("/bridge/search-games", requireAuth, async (req, res) => {
+  try {
+    const { searchTerm } = req.body;
+
+    if (!searchTerm || searchTerm.trim().length === 0) {
+      return res.status(400).json({ error: "Termo de busca é obrigatório" });
+    }
+
+    log(`🔎 Busca solicitada: "${searchTerm}"`, "SEARCH");
+    const games = await searchGames(searchTerm);
+
+    log(`✅ ${games.length} jogos encontrados`, "SEARCH");
+    res.json({ success: true, games });
+  } catch (error) {
+    console.error("[SEARCH] Erro:", error);
+    res.status(500).json({
+      error: error.message || "Erro ao buscar jogos",
+    });
+  }
+});
+
+/**
+ * Faz download de um jogo específico via Telegram e adiciona à fila
+ * POST /bridge/download-from-search
+ * Body: { command: string, gameName: string }
+ */
+router.post("/bridge/download-from-search", requireAuth, async (req, res) => {
+  try {
+    const { command, gameName } = req.body;
+
+    if (!command) {
+      return res
+        .status(400)
+        .json({ error: "Comando de download é obrigatório" });
+    }
+
+    log(
+      `⬇️ Download solicitado: ${command} (${gameName || "N/A"})`,
+      "DOWNLOAD"
+    );
+
+    // Busca o magnet link/torrent do bot
+    const torrentData = await fetchGameTorrent(command);
+
+    if (!torrentData || torrentData.type !== "magnet" || !torrentData.link) {
+      return res.status(500).json({
+        error: "Não foi possível obter o magnet link do jogo",
+      });
+    }
+
+    const magnetLink = torrentData.link;
+    log(`✅ Magnet link obtido: ${magnetLink.substring(0, 50)}...`, "DOWNLOAD");
+
+    // Adiciona à fila de downloads (reutiliza a lógica existente)
+    const id = `search_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+    const name = gameName || torrentData.filename || "Jogo do Bot";
+
+    // Verifica se já existe na fila ou ativo
+    const existingInQueue = downloadQueue.find(
+      (q) => q.input === magnetLink || q.magnet === magnetLink
+    );
+    const existingActive = Object.values(activeDownloads).find(
+      (d) => d.magnet === magnetLink
+    );
+
+    if (existingInQueue || existingActive) {
+      return res.status(409).json({
+        error: "Este jogo já está na fila ou sendo baixado",
+        id: existingInQueue?.id || existingActive?.id,
+      });
+    }
+
+    // Cria item da fila no formato esperado
+    const queueItem = {
+      id,
+      name,
+      input: magnetLink, // processTorrent aceita magnet link como string
+      source: "telegram_search",
+      addedAt: new Date().toISOString(),
+    };
+
+    // Adiciona à fila usando a função existente
+    addToQueue(queueItem);
+
+    res.json({
+      success: true,
+      message: "Jogo adicionado à fila de download",
+      id,
+      name,
+      position: downloadQueue.length,
+      queued: downloadQueue.length > MAX_CONCURRENT_DOWNLOADS,
+    });
+  } catch (error) {
+    console.error("[DOWNLOAD-SEARCH] Erro:", error);
+    res.status(500).json({
+      error: error.message || "Erro ao processar download",
+    });
   }
 });
 
