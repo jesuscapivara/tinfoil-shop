@@ -618,7 +618,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             // Destrói o torrent imediatamente para não baixar nada
             safeDestroyTorrent(torrent);
 
-            // Remove da lista ativa automaticamente após 3 segundos (mais rápido para duplicatas)
+            // Remove da lista ativa automaticamente após 10 segundos (alinhado com countdown do frontend)
             setTimeout(() => {
               if (
                 activeDownloads[id] &&
@@ -630,7 +630,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
                 );
                 onDownloadComplete(id);
               }
-            }, 3000); // 3 segundos para duplicatas
+            }, 10000); // 10 segundos para duplicatas (alinhado com countdown do frontend)
             return; // 🛑 PARA TUDO AQUI
           }
         }
