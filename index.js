@@ -37,38 +37,35 @@ const dbx = new Dropbox({
 const app = express();
 app.enable("trust proxy");
 
-// Configurar CORS para permitir requisições do frontend
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
-const allowedOrigins = [
-  FRONTEND_URL,
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://capivara.rossetti.eng.br",
-  // Adicione outros domínios conforme necessário
-];
+// CONFIGURAÇÃO CORS OTIMIZADA
+const FRONTEND_URL = process.env.FRONTEND_URL; // Produção
+const isDev = process.env.NODE_ENV !== "production";
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Permite requisições sem origin (ex: Postman, mobile apps, Tinfoil)
+      // 1. Permite requisições server-to-server ou ferramentas (Postman/Tinfoil)
       if (!origin) return callback(null, true);
 
-      // Permite se estiver na lista de origens permitidas
-      if (allowedOrigins.some((allowed) => origin.startsWith(allowed))) {
+      // 2. Produção: Whitelist estrita
+      if (FRONTEND_URL && origin === FRONTEND_URL) {
         return callback(null, true);
       }
 
-      // Em desenvolvimento, permite localhost em qualquer porta
-      if (
-        process.env.NODE_ENV !== "production" &&
-        origin.includes("localhost")
-      ) {
+      // 3. Desenvolvimento: Permite localhost em QUALQUER porta (Vite usa 5173, 5174...)
+      if (isDev && (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:"))) {
+        return callback(null, true);
+      }
+      
+      // 4. Domínios específicos legados/extras
+      const allowedDomains = ["https://capivara.rossetti.eng.br"];
+      if (allowedDomains.includes(origin)) {
         return callback(null, true);
       }
 
-      callback(new Error("Not allowed by CORS"));
+      callback(new Error(`CORS blocked origin: ${origin}`));
     },
-    credentials: true,
+    credentials: true, // Essencial para cookies/auth headers
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: [
       "Content-Type",
