@@ -85,6 +85,9 @@ PORT=8080
 DOMINIO=seu-app.com
 NODE_ENV=production
 
+# --- FRONTEND URL (para CORS) ---
+FRONTEND_URL=http://localhost:3000
+
 # --- BANCO DE DADOS ---
 MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/manashop
 
@@ -135,6 +138,42 @@ mana-tinfoil-shop/
 │   └── views/           # Templates Literais HTML (Renderização SSR leve)
 └── discloud.config      # Configuração de Deploy PaaS
 ```
+
+---
+
+## 🔗 Integração com Frontend
+
+O backend foi configurado para aceitar requisições do frontend separado através de CORS e autenticação JWT.
+
+### Endpoints Públicos
+
+- `GET /health` - Status de saúde do servidor
+- `GET /indexing-status` - Status da indexação de jogos
+
+### Endpoints Protegidos (Tinfoil Auth)
+
+- `GET /api` - Lista de jogos (requer Basic Auth Tinfoil)
+- `GET /api/refresh` - Força nova indexação (requer Basic Auth Tinfoil)
+
+### Endpoints Protegidos (JWT)
+
+- `GET /bridge/games` - Lista de jogos via bridge (requer JWT)
+- `GET /bridge/me` - Dados do usuário logado (requer JWT)
+- `POST /bridge/auth` - Autenticação/login
+- Outros endpoints `/bridge/*` - Requerem JWT
+
+### Autenticação
+
+O backend aceita autenticação de duas formas:
+
+1. **Basic Auth (Tinfoil)**: Para endpoints `/api/*`, usa credenciais Tinfoil (username/password)
+2. **JWT Bearer Token**: Para endpoints `/bridge/*`, aceita tokens JWT via:
+   - Header `Authorization: Bearer <token>` (recomendado para API/frontend)
+   - Cookie `auth_token` (para dashboard web)
+
+### CORS
+
+O CORS está configurado para permitir requisições do frontend. Configure a variável `FRONTEND_URL` no `.env` para o domínio do seu frontend.
 
 ---
 

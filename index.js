@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { Dropbox } from "dropbox";
 import fetch from "isomorphic-fetch";
 import dotenv from "dotenv";
@@ -36,7 +37,50 @@ const dbx = new Dropbox({
 const app = express();
 app.enable("trust proxy");
 
-// Servir arquivos estáticos do frontend
+// Configurar CORS para permitir requisições do frontend
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const allowedOrigins = [
+  FRONTEND_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  // Adicione outros domínios conforme necessário
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Permite requisições sem origin (ex: Postman, mobile apps, Tinfoil)
+      if (!origin) return callback(null, true);
+
+      // Permite se estiver na lista de origens permitidas
+      if (allowedOrigins.some((allowed) => origin.startsWith(allowed))) {
+        return callback(null, true);
+      }
+
+      // Em desenvolvimento, permite localhost em qualquer porta
+      if (
+        process.env.NODE_ENV !== "production" &&
+        origin.includes("localhost")
+      ) {
+        return callback(null, true);
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+    ],
+    exposedHeaders: ["Content-Length", "Content-Type"],
+  })
+);
+
+// Servir arquivos estáticos do frontend (mantido para compatibilidade)
 app.use("/public", express.static(path.join(__dirname, "frontend/public")));
 
 // Logger
@@ -54,6 +98,7 @@ app.use(express.json()); // Necessário para ler o JSON do magnet link
 app.use(manaBridge);
 
 // Rota de Health agora consome o status do serviço externo
+// Endpoint público - não requer autenticação
 app.get("/health", (req, res) => {
   res.json({
     status: "Online",
@@ -63,6 +108,19 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Endpoint público para status de indexação (usado pelo frontend)
+app.get("/indexing-status", (req, res) => {
+  const counts = countGamesByType(cachedGames);
+  res.json({
+    isIndexing,
+    progress: indexingProgress,
+    totalGames: cachedGames.length,
+    stats: counts, // Estatísticas detalhadas
+    lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
+  });
+});
+
+// Rotas protegidas - requerem autenticação Tinfoil
 app.use("/api", tinfoilAuth);
 app.use("/download", tinfoilAuth);
 
@@ -311,6 +369,7 @@ async function buildGameIndex() {
 }
 
 // --- ROTAS DA LOJA ---
+// Endpoint principal da API Tinfoil (requer autenticação)
 app.get(["/api", "/api/"], async (req, res) => {
   // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
   if (cachedGames.length === 0 && !isIndexing) {
@@ -342,21 +401,12 @@ app.get(["/api", "/api/"], async (req, res) => {
   });
 });
 
-app.get("/refresh", (req, res) => {
+// Endpoint para forçar indexação (requer autenticação Tinfoil)
+// Protegido pelo middleware tinfoilAuth aplicado em /api
+// A rota /refresh também funciona (mantida para compatibilidade)
+app.get("/refresh", tinfoilAuth, (req, res) => {
   buildGameIndex();
-  res.send("Indexação iniciada.");
-});
-
-// Endpoint para status da indexação (usado pelo admin dashboard)
-app.get("/indexing-status", (req, res) => {
-  const counts = countGamesByType(cachedGames);
-  res.json({
-    isIndexing,
-    progress: indexingProgress,
-    totalGames: cachedGames.length,
-    stats: counts, // Estatísticas detalhadas
-    lastUpdate: lastCacheTime ? new Date(lastCacheTime).toISOString() : null,
-  });
+  res.json({ success: true, message: "Indexação iniciada." });
 });
 
 // Endpoint para o Dashboard (Site)

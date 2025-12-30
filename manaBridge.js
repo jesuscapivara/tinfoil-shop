@@ -133,15 +133,29 @@ export const requireAuth = async (req, res, next) => {
     return res.status(500).send("Erro: Configure JWT_SECRET no .env");
   }
 
-  const cookies = req.headers.cookie || "";
-  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-  let token = tokenMatch ? tokenMatch[1] : null;
+  let token = null;
+
+  // 1. Tenta obter token do header Authorization (Bearer token) - para API/frontend
+  const authHeader = req.headers.authorization;
+  if (authHeader && /Bearer/i.test(authHeader)) {
+    token = authHeader.split(" ")[1];
+  }
+
+  // 2. Fallback: tenta obter token dos cookies (para dashboard web)
+  if (!token) {
+    const cookies = req.headers.cookie || "";
+    const tokenMatch = cookies.match(/auth_token=([^;]+)/);
+    if (tokenMatch) {
+      token = tokenMatch[1];
+      try {
+        token = decodeURIComponent(token);
+      } catch (e) {
+        // Ignora erro de decode
+      }
+    }
+  }
 
   if (token) {
-    try {
-      token = decodeURIComponent(token);
-    } catch (e) {}
-
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
 
@@ -162,6 +176,12 @@ export const requireAuth = async (req, res, next) => {
       // Token inválido ou expirado
       console.log("[AUTH] Token inválido:", err.message);
     }
+  }
+
+  // Se for requisição de API (JSON), retorna erro JSON
+  // Se for requisição web, redireciona para login
+  if (req.headers.accept && req.headers.accept.includes("application/json")) {
+    return res.status(401).json({ error: "Não autorizado" });
   }
 
   res.redirect("/admin/login");
