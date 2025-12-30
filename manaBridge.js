@@ -395,7 +395,8 @@ router.get("/admin/logout", (req, res) => {
 });
 
 router.get("/admin", requireAuth, (req, res) => {
-  res.send(dashboardView());
+  // Redireciona para o dashboard do novo frontend
+  res.redirect(`${FRONTEND_URL}/dashboard`);
 });
 
 router.get("/bridge/status", requireAuth, (req, res) => {
