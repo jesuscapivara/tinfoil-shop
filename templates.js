@@ -1414,6 +1414,7 @@ export function dashboardTemplate() {
                 } else if (user.isApproved) {
                     // É USUÁRIO APROVADO
                     box.style.borderColor = 'var(--success)';
+                    const hostOnly = user.host.includes('/api') ? user.host.replace('/api', '') : user.host.replace('https://', '').replace('http://', '').split('/')[0];
                     box.innerHTML = \`
                         <h3>🔑 Suas Credenciais Tinfoil</h3>
                         <div class="cred-grid">
@@ -1423,7 +1424,15 @@ export function dashboardTemplate() {
                             </div>
                             <div class="cred-item">
                                 <label>Host</label>
-                                <code>\${user.host}</code>
+                                <code>\${hostOnly}</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Port</label>
+                                <code style="color: var(--text-muted);">(em branco)</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Path</label>
+                                <code>/api</code>
                             </div>
                             <div class="cred-item">
                                 <label>Username</label>
@@ -1432,6 +1441,14 @@ export function dashboardTemplate() {
                             <div class="cred-item">
                                 <label>Password</label>
                                 <code>\${user.tinfoilPass}</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Title</label>
+                                <code>Capivara Shop</code>
+                            </div>
+                            <div class="cred-item">
+                                <label>Enable</label>
+                                <code>Sim</code>
                             </div>
                         </div>
                         <div class="cred-footer">

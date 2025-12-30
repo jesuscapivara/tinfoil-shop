@@ -113,10 +113,21 @@ export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
                     <p>Sua conta foi aprovada pelo administrador.</p>
                     <hr>
                     <h3>Suas Credenciais Tinfoil:</h3>
-                    <p><b>Protocol:</b> https</p>
-                    <p><b>Host:</b> ${DOMAIN}/api</p>
-                    <p><b>Username:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilUser}</code></p>
-                    <p><b>Password:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilPass}</code></p>
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0;">
+                        <p style="margin: 8px 0;"><b>Protocol:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">https</code></p>
+                        <p style="margin: 8px 0;"><b>Host:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">${
+                          DOMAIN.replace("https://", "")
+                            .replace("http://", "")
+                            .replace("/api", "")
+                            .split("/")[0]
+                        }</code></p>
+                        <p style="margin: 8px 0;"><b>Port:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">(em branco)</code></p>
+                        <p style="margin: 8px 0;"><b>Path:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">/api</code></p>
+                        <p style="margin: 8px 0;"><b>Username:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">${tinfoilUser}</code></p>
+                        <p style="margin: 8px 0;"><b>Password:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">${tinfoilPass}</code></p>
+                        <p style="margin: 8px 0;"><b>Title:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">Capivara Shop</code></p>
+                        <p style="margin: 8px 0;"><b>Enable:</b> <code style="background: #fff; padding: 4px 8px; border-radius: 4px;">Sim</code></p>
+                    </div>
                     <hr>
                     <p>Configure isso na aba "File Browser" do seu Tinfoil.</p>
                     <p>Você também pode acessar o <a href="https://${DOMAIN}/admin">Painel Web</a> para ver o status da loja e fazer pedidos.</p>
