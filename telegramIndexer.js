@@ -178,6 +178,46 @@ export async function fetchGameTorrent(downloadCommand) {
             throw new Error("Parse falhou: Objeto torrentInfo inválido.");
           }
 
+          // Extrai nomes dos arquivos do torrent para verificação de duplicatas
+          const fileNames = [];
+
+          // parse-torrent pode retornar arquivos em diferentes estruturas
+          if (torrentInfo.files && Array.isArray(torrentInfo.files)) {
+            torrentInfo.files.forEach((file) => {
+              if (file.path) {
+                // Se for array, pega o último elemento (nome do arquivo)
+                const fileName = Array.isArray(file.path)
+                  ? file.path[file.path.length - 1]
+                  : file.path;
+                fileNames.push(fileName);
+              } else if (file.name) {
+                fileNames.push(file.name);
+              }
+            });
+          } else if (
+            torrentInfo.info &&
+            torrentInfo.info.files &&
+            Array.isArray(torrentInfo.info.files)
+          ) {
+            torrentInfo.info.files.forEach((file) => {
+              if (file.path) {
+                const fileName = Array.isArray(file.path)
+                  ? file.path[file.path.length - 1]
+                  : file.path;
+                fileNames.push(fileName);
+              } else if (file.name) {
+                fileNames.push(file.name);
+              }
+            });
+          } else if (torrentInfo.name) {
+            // Se não tiver array de files, usa o nome do torrent
+            fileNames.push(torrentInfo.name);
+          }
+
+          console.log(
+            `[TELEGRAM] 📁 ${fileNames.length} arquivo(s) encontrado(s) no torrent`
+          );
+
           // Extrai trackers do arquivo .torrent original
           const trackers = new Set(); // Usa Set para evitar duplicatas
 
@@ -244,34 +284,11 @@ export async function fetchGameTorrent(downloadCommand) {
             `[TELEGRAM] ✅ Magnet link gerado: ${magnetURI.substring(0, 50)}...`
           );
 
-          // Extrai nomes dos arquivos do torrent para verificação de duplicatas
-          const fileNames = [];
-          if (torrentInfo.files && Array.isArray(torrentInfo.files)) {
-            torrentInfo.files.forEach((file) => {
-              if (file.path) {
-                // Se for array, pega o último elemento (nome do arquivo)
-                const fileName = Array.isArray(file.path)
-                  ? file.path[file.path.length - 1]
-                  : file.path;
-                fileNames.push(fileName);
-              } else if (file.name) {
-                fileNames.push(file.name);
-              }
-            });
-          } else if (torrentInfo.name) {
-            // Se não tiver array de files, usa o nome do torrent
-            fileNames.push(torrentInfo.name);
-          }
-
-          console.log(
-            `[TELEGRAM] 📁 ${fileNames.length} arquivo(s) encontrado(s) no torrent`
-          );
-
           resolve({
             type: "magnet",
             link: magnetURI,
             filename: msg.file?.name || "game.torrent",
-            fileNames: fileNames, // Lista de nomes de arquivos para verificação
+            fileNames: fileNames, // Lista de nomes de arquivos para verificação (já extraída acima)
           });
         } catch (error) {
           console.error("[TELEGRAM] ❌ Erro ao processar torrent:", error);
