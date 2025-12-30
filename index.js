@@ -70,10 +70,11 @@ app.use(
         return callback(null, true);
       }
 
-      // 5. Permite localhost:3000 mesmo em produção (para desenvolvimento local do frontend)
+      // 5. Permite localhost em QUALQUER porta mesmo em produção (para desenvolvimento local do frontend)
+      // Isso permite que o frontend local se conecte ao backend em produção, independente da porta
       if (
-        origin === "http://localhost:3000" ||
-        origin === "http://127.0.0.1:3000"
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:")
       ) {
         return callback(null, true);
       }
