@@ -4,8 +4,6 @@
  */
 
 import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
-import { NewMessage } from "telegram/events";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -18,6 +16,34 @@ const targetBot = process.env.TARGET_BOT_USERNAME?.toLowerCase();
 
 let telegramClient = null;
 let isConnecting = false;
+let StringSessionClass = null;
+let NewMessageClass = null;
+
+/**
+ * Carrega as classes necessárias do Telegram (importação dinâmica para ES modules)
+ */
+async function loadTelegramClasses() {
+  if (StringSessionClass && NewMessageClass) {
+    return { StringSession: StringSessionClass, NewMessage: NewMessageClass };
+  }
+
+  try {
+    // Importações dinâmicas para compatibilidade com ES modules
+    const sessionsModule = await import("telegram/sessions");
+    StringSessionClass = sessionsModule.StringSession;
+
+    const eventsModule = await import("telegram/events");
+    NewMessageClass = eventsModule.NewMessage;
+
+    return {
+      StringSession: StringSessionClass,
+      NewMessage: NewMessageClass,
+    };
+  } catch (error) {
+    console.error("[TELEGRAM] Erro ao carregar classes:", error);
+    throw new Error(`Falha ao carregar módulos do Telegram: ${error.message}`);
+  }
+}
 
 /**
  * Inicializa o cliente do Telegram
@@ -44,6 +70,9 @@ async function initTelegramClient() {
   isConnecting = true;
 
   try {
+    // Carrega as classes necessárias
+    const { StringSession } = await loadTelegramClasses();
+
     const session = new StringSession(stringSession);
     telegramClient = new TelegramClient(session, apiId, apiHash, {
       connectionRetries: 5,
@@ -73,6 +102,7 @@ export async function searchGames(searchTerm) {
   }
 
   const client = await initTelegramClient();
+  const { NewMessage } = await loadTelegramClasses();
 
   console.log(`[TELEGRAM] 🔎 Buscando: "${searchTerm}"...`);
 
@@ -108,6 +138,7 @@ export async function searchGames(searchTerm) {
  */
 export async function fetchGameTorrent(downloadCommand) {
   const client = await initTelegramClient();
+  const { NewMessage } = await loadTelegramClasses();
 
   console.log(`[TELEGRAM] ⬇️ Enviando comando: ${downloadCommand}...`);
 
