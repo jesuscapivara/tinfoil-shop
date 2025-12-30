@@ -688,7 +688,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
         // Progresso do download
         let lastLoggedProgress = 0;
         torrent.on("download", () => {
-          const progress = Math.floor(torrent.progress * 100);
+          const progress = torrent.progress * 100; // Mantém decimais para cálculo preciso
           const downloaded = torrent.downloaded;
           const downloadSpeed = torrent.downloadSpeed;
           const uploadSpeed = torrent.uploadSpeed;
@@ -714,7 +714,7 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             return `${mins}:${secs.toString().padStart(2, "0")}`;
           };
 
-          activeDownloads[id].downloadPercent = progress.toFixed(1);
+          activeDownloads[id].downloadPercent = parseFloat(progress.toFixed(1));
           activeDownloads[id].downloadSpeed =
             (downloadSpeed / 1024 / 1024).toFixed(1) + " MB/s";
           activeDownloads[id].downloaded = formatBytes(downloaded);
@@ -1422,7 +1422,7 @@ async function uploadWithSmartStream(
                 100;
               activeDownloads[downloadId].uploadPercent = Math.min(
                 100,
-                totalProgress.toFixed(1)
+                parseFloat(totalProgress.toFixed(1))
               );
             }
           }
