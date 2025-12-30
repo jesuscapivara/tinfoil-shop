@@ -91,6 +91,8 @@ app.use(
       "Origin",
     ],
     exposedHeaders: ["Content-Length", "Content-Type"],
+    preflightContinue: false, // Responde ao preflight imediatamente
+    optionsSuccessStatus: 204, // Status code para OPTIONS bem-sucedido
   })
 );
 
