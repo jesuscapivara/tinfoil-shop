@@ -102,7 +102,9 @@ app.use(
 app.use((req, res, next) => {
   if (
     !req.path.includes(".") &&
-    (req.path.startsWith("/api") || req.path.startsWith("/download"))
+    (req.path === "/" ||
+      req.path.startsWith("/api") ||
+      req.path.startsWith("/download"))
   ) {
     console.log(`[REQ] ${req.method} ${req.path} - IP: ${req.ip}`);
   }
@@ -385,7 +387,8 @@ async function buildGameIndex() {
 
 // --- ROTAS DA LOJA ---
 // Endpoint principal da API Tinfoil (requer autenticação)
-app.get(["/api", "/api/"], async (req, res) => {
+// Funciona na raiz (/) para api.rossetti.eng.br e também em /api para compatibilidade
+app.get(["/", "/api", "/api/"], tinfoilAuth, async (req, res) => {
   // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
   if (cachedGames.length === 0 && !isIndexing) {
     const savedCache = await getGameCache();

@@ -343,7 +343,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
       isApproved: true,
       tinfoilUser: "admin",
       tinfoilPass: "*********",
-      host: `${DOMAIN}/api`,
+      host: `${DOMAIN}`,
       protocol: "https",
     });
   }
@@ -359,7 +359,7 @@ router.get("/bridge/me", requireAuth, async (req, res) => {
         isApproved: user.isApproved,
         tinfoilUser: user.tinfoilUser,
         tinfoilPass: null,
-        host: `${DOMAIN}/api`,
+        host: `${DOMAIN}`,
         protocol: "https",
       });
     } else {
