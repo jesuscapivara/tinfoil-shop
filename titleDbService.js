@@ -175,3 +175,38 @@ export function parseGameInfo(fileName) {
 
   return { name: cleanName, id: titleId, version };
 }
+
+/**
+ * Busca Title ID pelo nome do jogo (para jogos da busca do Telegram)
+ * @param {string} gameName - Nome do jogo (ex: "Mario Kart 8 Deluxe")
+ * @returns {string|null} - Title ID se encontrado, null caso contrário
+ */
+export function findTitleIdByName(gameName) {
+  if (!gameName || titleDbMap.size === 0) return null;
+
+  // Normaliza o nome para busca
+  const normalized = normalize(gameName);
+  if (normalized && titleDbMap.has(normalized)) {
+    return titleDbMap.get(normalized);
+  }
+
+  // Fallback: busca exata lowercase
+  const exactName = gameName.toLowerCase();
+  if (titleDbMap.has(exactName)) {
+    return titleDbMap.get(exactName);
+  }
+
+  // Tenta busca parcial (remove palavras comuns)
+  const cleanName = gameName
+    .toLowerCase()
+    .replace(/\b(the|a|an|and|or|but|in|on|at|to|for|of|with|by)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const cleanNormalized = normalize(cleanName);
+  if (cleanNormalized && titleDbMap.has(cleanNormalized)) {
+    return titleDbMap.get(cleanNormalized);
+  }
+
+  return null;
+}

@@ -28,7 +28,7 @@ import {
   User,
 } from "./database.js";
 import { sendNewUserAlert, sendApprovalEmail } from "./emailService.js";
-import { parseGameInfo } from "./titleDbService.js";
+import { parseGameInfo, findTitleIdByName } from "./titleDbService.js";
 import { searchGames, fetchGameTorrent } from "./telegramIndexer.js";
 
 dotenv.config();
@@ -2052,8 +2052,22 @@ router.post("/bridge/search-games", requireAuth, async (req, res) => {
     log(`🔎 Busca solicitada: "${searchTerm}"`, "SEARCH");
     const games = await searchGames(searchTerm);
 
-    log(`✅ ${games.length} jogos encontrados`, "SEARCH");
-    res.json({ success: true, games });
+    // ✅ Enriquece os jogos com Title ID usando o TitleDB
+    const enrichedGames = games.map((game) => {
+      const titleId = findTitleIdByName(game.name);
+      return {
+        ...game,
+        titleId: titleId || null, // Adiciona titleId se encontrado
+      };
+    });
+
+    log(
+      `✅ ${games.length} jogos encontrados (${
+        enrichedGames.filter((g) => g.titleId).length
+      } com Title ID)`,
+      "SEARCH"
+    );
+    res.json({ success: true, games: enrichedGames });
   } catch (error) {
     console.error("[SEARCH] Erro:", error);
     res.status(500).json({
