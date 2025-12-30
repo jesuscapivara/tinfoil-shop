@@ -62,7 +62,10 @@ app.use(
       }
 
       // 4. Domínios específicos legados/extras
-      const allowedDomains = ["https://capivara.rossetti.eng.br"];
+      const allowedDomains = [
+        "https://capivara.rossetti.eng.br",
+        "https://tinfoil-frontend.vercel.app", // Frontend em Produção (Vercel)
+      ];
       if (allowedDomains.includes(origin)) {
         return callback(null, true);
       }
