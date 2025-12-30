@@ -8,8 +8,8 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { EventEmitter } from "events";
 import fs from "fs";
-import { loginView } from "./frontend/views/login.js";
-import { dashboardView } from "./frontend/views/dashboard.js";
+// Frontend antigo removido - agora o frontend é separado
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 // ✅ Sistema de Eventos: "Megafone" para comunicação entre módulos
 export const bridgeEvents = new EventEmitter();
@@ -179,12 +179,12 @@ export const requireAuth = async (req, res, next) => {
   }
 
   // Se for requisição de API (JSON), retorna erro JSON
-  // Se for requisição web, redireciona para login
+  // Se for requisição web, redireciona para o novo frontend
   if (req.headers.accept && req.headers.accept.includes("application/json")) {
     return res.status(401).json({ error: "Não autorizado" });
   }
 
-  res.redirect("/admin/login");
+  res.redirect(`${FRONTEND_URL}/login`);
 };
 
 // ROTA DE REGISTRO (Nova)
@@ -223,73 +223,22 @@ router.post("/bridge/register", async (req, res) => {
   }
 });
 
-// --- ROTA RAIZ: REDIRECIONAMENTO INTELIGENTE ---
+// --- ROTA RAIZ: REDIRECIONAMENTO PARA O NOVO FRONTEND ---
 router.get("/", async (req, res) => {
-  const cookies = req.headers.cookie || "";
-  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-  let token = tokenMatch ? tokenMatch[1] : null;
-
-  if (token) {
-    try {
-      token = decodeURIComponent(token);
-    } catch (e) {
-      // Ignora erro de decode
-    }
-
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (
-        (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) ||
-        (decoded.role === "user" && decoded.id)
-      ) {
-        const user =
-          decoded.role === "user" ? await User.findById(decoded.id) : null;
-        if (decoded.role === "admin" || (user && user.isApproved)) {
-          return res.redirect("/admin");
-        }
-      }
-    } catch (err) {}
-  }
-
-  // Se não tem token válido, vai para login
-  res.redirect("/admin/login");
+  // Redireciona para o novo frontend
+  res.redirect(FRONTEND_URL);
 });
 
 // --- ROTAS DE AUTENTICAÇÃO ---
+// Redireciona para o novo frontend
 router.get("/admin/login", async (req, res) => {
-  const cookies = req.headers.cookie || "";
-  const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-  let token = tokenMatch ? tokenMatch[1] : null;
+  // Redireciona para a página de login do novo frontend
+  res.redirect(`${FRONTEND_URL}/login`);
+});
 
-  if (token) {
-    try {
-      // Decodifica URL encoding se houver
-      token = decodeURIComponent(token);
-    } catch (e) {
-      // Ignora erro de decode
-    }
-
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-
-      // Se for admin
-      if (decoded.role === "admin" && decoded.email === ADMIN_EMAIL) {
-        return res.redirect("/admin");
-      }
-
-      // Se for usuário comum
-      if (decoded.role === "user" && decoded.id) {
-        const user = await User.findById(decoded.id);
-        if (user && user.isApproved) {
-          return res.redirect("/admin");
-        }
-      }
-    } catch (err) {
-      // Token inválido, continua para mostrar login
-    }
-  }
-
-  res.send(loginView());
+router.get("/admin", requireAuth, (req, res) => {
+  // Redireciona para o dashboard do novo frontend
+  res.redirect(`${FRONTEND_URL}/dashboard`);
 });
 
 router.post("/bridge/auth", async (req, res) => {
@@ -305,7 +254,11 @@ router.post("/bridge/auth", async (req, res) => {
     const cookieOptions = getCookieOptions();
     res.cookie("auth_token", token, cookieOptions);
     console.log(`[AUTH] ✅ Admin logado: ${email}`);
-    return res.json({ success: true, redirect: "/admin" });
+    return res.json({
+      success: true,
+      redirect: `${FRONTEND_URL}/dashboard`,
+      token,
+    });
   }
 
   // 2. Verifica se é usuário normal (MongoDB)
@@ -321,7 +274,11 @@ router.post("/bridge/auth", async (req, res) => {
       const cookieOptions = getCookieOptions();
       res.cookie("auth_token", token, cookieOptions);
       console.log(`[AUTH] ✅ Usuário logado: ${email}`);
-      return res.json({ success: true, redirect: "/admin" });
+      return res.json({
+        success: true,
+        redirect: `${FRONTEND_URL}/dashboard`,
+        token,
+      });
     }
   }
 

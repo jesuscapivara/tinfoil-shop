@@ -43,6 +43,7 @@ const allowedOrigins = [
   FRONTEND_URL,
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+  "https://capivara.rossetti.eng.br",
   // Adicione outros domínios conforme necessário
 ];
 
@@ -80,8 +81,7 @@ app.use(
   })
 );
 
-// Servir arquivos estáticos do frontend (mantido para compatibilidade)
-app.use("/public", express.static(path.join(__dirname, "frontend/public")));
+// Frontend antigo removido - agora o frontend é separado
 
 // Logger
 app.use((req, res, next) => {
