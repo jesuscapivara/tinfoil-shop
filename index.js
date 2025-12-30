@@ -467,6 +467,18 @@ app.get("/refresh", tinfoilAuth, (req, res) => {
   res.json({ success: true, message: "Indexação iniciada." });
 });
 
+// Endpoint bridge para forçar indexação (requer JWT - apenas admin)
+app.post("/bridge/refresh-index", requireAuth, (req, res) => {
+  // Verifica se é admin
+  if (req.user.role !== "admin") {
+    return res
+      .status(403)
+      .json({ error: "Apenas administradores podem forçar indexação" });
+  }
+  buildGameIndex();
+  res.json({ success: true, message: "Indexação iniciada." });
+});
+
 // Endpoint para o Dashboard (Site)
 app.get("/bridge/games", requireAuth, (req, res) => {
   const counts = countGamesByType(cachedGames);
