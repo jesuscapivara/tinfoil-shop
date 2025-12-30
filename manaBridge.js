@@ -391,7 +391,7 @@ router.post("/bridge/users/reject/:id", requireAuth, async (req, res) => {
 
 router.get("/admin/logout", (req, res) => {
   res.clearCookie("auth_token", { path: "/" });
-  res.redirect("/admin/login");
+  res.redirect(`${FRONTEND_URL}/login`);
 });
 
 router.get("/admin", requireAuth, (req, res) => {
