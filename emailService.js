@@ -114,7 +114,7 @@ export async function sendApprovalEmail(userEmail, tinfoilUser, tinfoilPass) {
                     <hr>
                     <h3>Suas Credenciais Tinfoil:</h3>
                     <p><b>Protocol:</b> https</p>
-                    <p><b>Host:</b> ${DOMAIN}</p>
+                    <p><b>Host:</b> ${DOMAIN}/api</p>
                     <p><b>Username:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilUser}</code></p>
                     <p><b>Password:</b> <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">${tinfoilPass}</code></p>
                     <hr>
