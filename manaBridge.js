@@ -244,8 +244,20 @@ router.get("/admin", requireAuth, (req, res) => {
 router.post("/bridge/auth", async (req, res) => {
   const { email, password } = req.body;
 
+  // Log para debug (sem mostrar a senha)
+  console.log(`[AUTH] Tentativa de login: ${email}`);
+  console.log(`[AUTH] Admin Email configurado: ${ADMIN_EMAIL ? "SIM" : "NÃO"}`);
+  console.log(`[AUTH] Admin Pass configurado: ${ADMIN_PASS ? "SIM" : "NÃO"}`);
+
+  // Normaliza email (remove espaços e converte para lowercase)
+  const cleanEmail = email?.trim().toLowerCase();
+  const cleanPassword = password?.trim();
+
   // 1. Verifica se é o Admin Supremo (.env)
-  if (email === ADMIN_EMAIL && password === ADMIN_PASS) {
+  if (
+    cleanEmail === ADMIN_EMAIL?.toLowerCase() &&
+    cleanPassword === ADMIN_PASS
+  ) {
     const token = generateToken({
       email: ADMIN_EMAIL,
       role: "admin",
