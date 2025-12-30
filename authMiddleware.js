@@ -21,6 +21,12 @@ function cleanCache() {
 setInterval(cleanCache, 10 * 60 * 1000);
 
 export async function tinfoilAuth(req, res, next) {
+  console.log(`[AUTH] 🔍 Requisição recebida: ${req.method} ${req.path}`);
+  console.log(`[AUTH] 📋 Headers:`, {
+    authorization: req.headers.authorization ? "Presente" : "Ausente",
+    "user-agent": req.headers["user-agent"],
+  });
+
   let user = null;
   let pass = null;
 
@@ -33,7 +39,9 @@ export async function tinfoilAuth(req, res, next) {
       const decoded = Buffer.from(credentials, "base64").toString().split(":");
       user = decoded[0];
       pass = decoded[1];
+      console.log(`[AUTH] 🔑 Credenciais extraídas do header Basic Auth`);
     } catch (e) {
+      console.log(`[AUTH] ⚠️ Erro ao decodificar Basic Auth:`, e.message);
       // Falha silenciosa no decode, segue para query
     }
   }
@@ -42,15 +50,19 @@ export async function tinfoilAuth(req, res, next) {
   if (!user && req.query.u && req.query.p) {
     user = req.query.u;
     pass = req.query.p;
+    console.log(`[AUTH] 🔑 Credenciais extraídas dos query params`);
   }
 
   // 2. REJEIÇÃO RÁPIDA (Sem credenciais)
   if (!user || !pass) {
+    console.log(`[AUTH] 🚫 Sem credenciais - retornando 401`);
     // Retornamos JSON direto. HTML trava o Tinfoil.
     return res.status(401).json({
       error: "Mana Shop: Autenticação necessária (User/Pass)",
     });
   }
+
+  console.log(`[AUTH] 👤 Tentativa de login: ${user}`);
 
   // Normaliza usuário para evitar duplicidade no cache
   const normalizedUser = user.toLowerCase().trim();

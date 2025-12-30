@@ -390,6 +390,7 @@ async function buildGameIndex() {
 // Funciona na raiz (/) para api.rossetti.eng.br e também em /api para compatibilidade
 // Aplica autenticação diretamente na rota da raiz, e /api já tem via app.use
 app.get("/", tinfoilAuth, async (req, res) => {
+  console.log(`[API] ✅ Autenticação passou, processando requisição GET /`);
   // ✅ Se o cache está vazio, tenta recarregar do banco primeiro (indexação incremental)
   if (cachedGames.length === 0 && !isIndexing) {
     const savedCache = await getGameCache();
@@ -404,6 +405,9 @@ app.get("/", tinfoilAuth, async (req, res) => {
   }
 
   if (isIndexing && cachedGames.length === 0) {
+    console.log(
+      `[API] ⏳ Indexação em andamento, retornando mensagem de espera`
+    );
     return res.json({
       success: `Loja Iniciando... (${indexingProgress})`,
       files: [],
@@ -412,12 +416,15 @@ app.get("/", tinfoilAuth, async (req, res) => {
 
   // Tinfoil lê esse JSON. O campo "id" ajuda ele a achar a capa sozinho no Switch!
   const counts = countGamesByType(cachedGames);
+  console.log(`[API] 📦 Retornando ${cachedGames.length} jogos para o Tinfoil`);
   res.setHeader("Content-Type", "application/json");
-  res.json({
+  const response = {
     files: cachedGames,
     success: `Capivara Shop (${counts.base} jogos base, ${counts.dlc} DLCs, ${counts.update} updates)`,
     stats: counts, // Estatísticas detalhadas
-  });
+  };
+  console.log(`[API] ✅ Resposta enviada com ${cachedGames.length} jogos`);
+  res.json(response);
 });
 
 // Rota /api também (compatibilidade - middleware já aplicado via app.use)
