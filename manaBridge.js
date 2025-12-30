@@ -866,10 +866,11 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             log(`   ✅ Jogos indexados automaticamente no banco`, "SUCCESS");
             log(`═══════════════════════════════════════════════`, "SUCCESS");
 
-            // Marca como concluído
+            // 1. ATUALIZAÇÃO: Muda a fase para INDEXING antes de finalizar
+            activeDownloads[id].phase = "indexing"; // <--- NOVA FASE
             activeDownloads[id].uploadPercent = 100;
             activeDownloads[id].uploadDone = true;
-            activeDownloads[id].phase = "done";
+            activeDownloads[id].uploadStatus = "Catalogando na biblioteca..."; // Mensagem amigável
 
             // Adiciona ao histórico de finalizados
             const completedEntry = {
@@ -895,6 +896,10 @@ function processTorrent(torrentInput, id, inputType = "magnet") {
             if (completedDownloads.length > MAX_COMPLETED) {
               completedDownloads.pop();
             }
+
+            // Mantém o resto, mas a fase "done" só entra depois de tudo salvo
+            activeDownloads[id].phase = "done";
+            activeDownloads[id].uploadStatus = "Pronto para jogar!";
 
             // Remove do ativo após 10 segundos e processa próximo da fila
             setTimeout(() => {
